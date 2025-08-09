@@ -1,0 +1,192 @@
+/* Custom styles for Plant Breeder Sim */
+
+body {
+    background-color: #f8f9fa;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* Navigation enhancements */
+.navbar-brand {
+    font-weight: 600;
+    font-size: 1.3rem;
+}
+
+/* Plant card styling */
+.plant-card {
+    transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+    border: 1px solid #e9ecef;
+}
+
+.plant-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+/* Plant stats styling */
+.plant-stats .stat-item {
+    padding: 0.5rem;
+}
+
+.stat-value {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #495057;
+}
+
+.stat-label {
+    font-size: 0.8rem;
+    color: #6c757d;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Appearance display */
+.appearance-display {
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    min-height: 2.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Gradient badge for variegated plants */
+.bg-gradient {
+    background: linear-gradient(45deg, #ffffff 30%, #007bff 70%) !important;
+    color: #000 !important;
+    border: 1px solid #007bff;
+}
+
+/* Seed inventory cards */
+.card.border-primary {
+    border-width: 2px !important;
+}
+
+/* Enhanced buttons */
+.btn {
+    border-radius: 6px;
+    font-weight: 500;
+    transition: all 0.2s ease-in-out;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+}
+
+/* Health progress bar enhancements */
+.progress {
+    background-color: #e9ecef;
+    border-radius: 3px;
+}
+
+.progress-bar {
+    transition: width 0.6s ease;
+}
+
+/* Card header styling */
+.card-header {
+    border-bottom: 2px solid rgba(255,255,255,0.2);
+    font-weight: 600;
+}
+
+/* Icon styling */
+[data-feather] {
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    fill: none;
+}
+
+/* Alert enhancements */
+.alert {
+    border: none;
+    border-radius: 8px;
+    border-left: 4px solid;
+}
+
+.alert-info {
+    border-left-color: #17a2b8;
+}
+
+/* Empty state styling */
+.text-muted [data-feather] {
+    opacity: 0.5;
+}
+
+/* Footer styling */
+footer {
+    margin-top: auto;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .plant-card {
+        margin-bottom: 1rem;
+    }
+    
+    .navbar-brand {
+        font-size: 1.1rem;
+    }
+    
+    .display-4 {
+        font-size: 2rem;
+    }
+}
+
+/* Loading states and animations */
+.btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Species-specific plant card accents */
+.plant-card[data-species="Pea"] {
+    border-left: 4px solid #28a745;
+}
+
+.plant-card[data-species="Tomato"] {
+    border-left: 4px solid #dc3545;
+}
+
+.plant-card[data-species="Marigold"] {
+    border-left: 4px solid #ffc107;
+}
+
+/* Enhanced hover effects for interactive elements */
+.card:hover {
+    transition: box-shadow 0.15s ease-in-out;
+}
+
+.btn-success:hover {
+    background-color: #1e7e34;
+    border-color: #1c7430;
+}
+
+.btn-warning:hover {
+    background-color: #e0a800;
+    border-color: #d39e00;
+}
+
+/* Accessibility improvements */
+.btn:focus {
+    box-shadow: 0 0 0 0.2rem rgba(40, 167, 69, 0.25);
+}
+
+/* Dark mode support for future implementation */
+@media (prefers-color-scheme: dark) {
+    body {
+        background-color: #121212;
+        color: #ffffff;
+    }
+    
+    .card {
+        background-color: #1e1e1e;
+        border-color: #333;
+    }
+    
+    .appearance-display {
+        background-color: #2a2a2a;
+        border-color: #444;
+    }
+}

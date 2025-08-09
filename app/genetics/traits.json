@@ -1,0 +1,29 @@
+{
+  "traits": [
+    {
+      "id": "petal_color",
+      "type": "mendelian",
+      "loci": ["C"],
+      "alleles": { "C": "color", "c": "white" },
+      "dominance": ["C", "c"]
+    },
+    {
+      "id": "height",
+      "type": "polygenic",
+      "loci": ["H1", "H2", "H3", "H4"],
+      "alleles": {
+        "H+": { "code": "H+", "value": 1 },
+        "h":  { "code": "h",  "value": 0 }
+      }
+    },
+    {
+      "id": "variegation",
+      "type": "epistatic",
+      "loci": ["VAR"],
+      "alleles": {
+        "V": { "code": "V", "effect": "no_variegation" },
+        "v": { "code": "v", "effect": "variegation_if_homozygous" }
+      }
+    }
+  ]
+}

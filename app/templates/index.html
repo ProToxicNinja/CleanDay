@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Welcome - Plant Breeder Sim{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="text-center mb-5">
+            <h1 class="display-4 text-success">
+                <i data-feather="sun" class="me-3"></i>
+                Plant Breeder Sim
+            </h1>
+            <p class="lead text-muted">
+                Welcome to the world of plant genetics and breeding!
+            </p>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="card-body text-center">
+                <h3 class="card-title">Getting Started</h3>
+                <p class="card-text">
+                    Your greenhouse awaits! You've been given starter seeds for three species:
+                    <strong>Pea</strong>, <strong>Tomato</strong>, and <strong>Marigold</strong>.
+                </p>
+                <p class="card-text">
+                    Plant your seeds, watch them grow, and discover the fascinating world of genetics
+                    through Mendelian inheritance, polygenic traits, and epistatic interactions.
+                </p>
+                <a href="/greenhouse" class="btn btn-success btn-lg">
+                    <i data-feather="arrow-right" class="me-2"></i>
+                    Enter Greenhouse
+                </a>
+            </div>
+        </div>
+
+        <div class="row mt-4">
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <i data-feather="droplet" class="text-primary mb-2" style="width: 3rem; height: 3rem;"></i>
+                        <h5 class="card-title">Mendelian Traits</h5>
+                        <p class="card-text small">
+                            Discover dominant and recessive alleles through petal color inheritance.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <i data-feather="trending-up" class="text-warning mb-2" style="width: 3rem; height: 3rem;"></i>
+                        <h5 class="card-title">Polygenic Height</h5>
+                        <p class="card-text small">
+                            Multiple loci work together to determine plant height in complex patterns.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <i data-feather="shuffle" class="text-info mb-2" style="width: 3rem; height: 3rem;"></i>
+                        <h5 class="card-title">Epistatic Effects</h5>
+                        <p class="card-text small">
+                            Some genes can mask or modify the expression of others, creating variegation.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
