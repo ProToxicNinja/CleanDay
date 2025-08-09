@@ -53,6 +53,18 @@ CREATE TABLE IF NOT EXISTS fruits (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
+
+CREATE TABLE IF NOT EXISTS slots (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  plant_id TEXT,
+  soil TEXT NOT NULL DEFAULT 'loam',
+  light TEXT NOT NULL DEFAULT 'med',
+  water TEXT NOT NULL DEFAULT 'ok',
+  temp TEXT NOT NULL DEFAULT 'warm',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
 """
 
 def get_conn() -> sqlite3.Connection:
@@ -77,7 +89,7 @@ def init_db():
             conn.execute("ALTER TABLE plants ADD COLUMN stage TEXT DEFAULT 'seedling'")
         except sqlite3.OperationalError:
             pass
-        # fruits table creation handled by SCHEMA above
+        # fruits and slots tables creation handled by SCHEMA above
     conn.close()
 
 def q(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> List[sqlite3.Row]:

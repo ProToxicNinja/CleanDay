@@ -1,24 +1,48 @@
 import json
 from fastapi import APIRouter, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from app.db import get_conn, q, exec1
 from app.utils import (
     uid, express_phenotype, next_generation_label, grant_starter_pack,
-    compute_lot_qty, preview_cross_stats
+    compute_lot_qty, preview_cross_stats,
+    ensure_slots, get_first_empty_slot, bind_plant_to_slot, unbind_plant_from_slot,
+    get_env_for_plant
 )
-from app.genetics.engine import simple_tick, recombine_genomes, GROWTH, compute_stage
+from app.genetics.engine import simple_tick, recombine_genomes, BASE_FRUIT_DAYS, fruit_days_with_env, compute_stage
 
 templates = Jinja2Templates(directory="app/templates")
 router = APIRouter()
+
+# ---------- Sprites (SVG on the fly) ----------
+@router.get("/sprite/{species}/{stage}.svg")
+async def sprite(species: str, stage: str):
+    species = species.lower()
+    stage = stage.lower()
+    # colors per species (placeholder palette)
+    base = {"pea":"#6fc36f","tomato":"#e05b5b","marigold":"#f5a623"}.get(species, "#9aa0ae")
+    # stage outline/intensity
+    stroke = {"seedling":"#94d27d","juvenile":"#7db6e0","mature":"#ceb26d","flowering":"#e48bd1","spent":"#555a66"}.get(stage,"#9aa0ae")
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="80" height="60" viewBox="0 0 80 60">
+  <rect x="6" y="46" width="68" height="10" rx="3" fill="#3a3f55"/>
+  <path d="M40 46 C42 38 42 30 40 22" stroke="{stroke}" stroke-width="3" fill="none"/>
+  <circle cx="40" cy="20" r="10" fill="{base}" opacity="{0.9 if stage in ('flowering','mature') else 0.6}"/>
+  {"<circle cx='40' cy='12' r='5' fill='#ffd4f5'/>" if stage == "flowering" else ""}
+  {"<line x1='30' y1='32' x2='20' y2='26' stroke='"+stroke+"' stroke-width='3'/>" if stage in ("juvenile","mature","flowering") else ""}
+  {"<line x1='50' y1='32' x2='60' y2='26' stroke='"+stroke+"' stroke-width='3'/>" if stage in ("juvenile","mature","flowering") else ""}
+  {"<line x1='38' y1='46' x2='42' y2='46' stroke='#273' stroke-width='4'/>"}
+</svg>"""
+    return Response(content=svg, media_type="image/svg+xml")
 
 @router.get("/greenhouse", response_class=HTMLResponse)
 async def greenhouse(request: Request):
     player_id = request.state.player_id
     conn = get_conn()
+    ensure_slots(conn, player_id, 6)
     plants = q(conn, "SELECT * FROM plants WHERE user_id=? ORDER BY created_at DESC", (player_id,))
-    seeds = q(conn, "SELECT * FROM seeds WHERE user_id=? ORDER BY species", (player_id,))
+    seeds  = q(conn, "SELECT * FROM seeds  WHERE user_id=? ORDER BY species", (player_id,))
     fruits = q(conn, "SELECT * FROM fruits WHERE user_id=? ORDER BY created_at DESC", (player_id,))
+    slots  = q(conn, "SELECT * FROM slots  WHERE user_id=? ORDER BY created_at ASC", (player_id,))
 
     plant_cards = []
     for row in plants:
@@ -36,31 +60,41 @@ async def greenhouse(request: Request):
         })
     conn.close()
     return templates.TemplateResponse("greenhouse.html", {
-        "request": request,
-        "plants": plant_cards,
-        "seeds": seeds,
-        "fruits": fruits
+        "request": request, "plants": plant_cards, "seeds": seeds,
+        "fruits": fruits, "slots": slots
     })
+
+@router.post("/slot_update")
+async def slot_update(request: Request, slot_id: str = Form(...), soil: str = Form(...), light: str = Form(...),
+                      water: str = Form(...), temp: str = Form(...)):
+    player_id = request.state.player_id
+    conn = get_conn()
+    exec1(conn, "UPDATE slots SET soil=?, light=?, water=?, temp=? WHERE id=? AND user_id=?",
+          (soil, light, water, temp, slot_id, player_id))
+    conn.close()
+    return RedirectResponse(url="/greenhouse", status_code=303)
 
 @router.post("/plant_seed")
 async def plant_seed(request: Request, seed_id: str = Form(...)):
     player_id = request.state.player_id
     conn = get_conn()
+    ensure_slots(conn, player_id, 6)
     rows = q(conn, "SELECT * FROM seeds WHERE id=? AND user_id=?", (seed_id, player_id))
     if not rows:
-        conn.close()
-        return RedirectResponse(url="/greenhouse", status_code=303)
+        conn.close(); return RedirectResponse(url="/greenhouse", status_code=303)
     lot = rows[0]
     if lot["qty"] <= 0:
-        conn.close()
-        return RedirectResponse(url="/greenhouse", status_code=303)
+        conn.close(); return RedirectResponse(url="/greenhouse", status_code=303)
+
+    slot = get_first_empty_slot(conn, player_id)
+    if not slot:
+        conn.close(); return RedirectResponse(url="/greenhouse", status_code=303)
 
     exec1(conn, "UPDATE seeds SET qty=? WHERE id=?", (lot["qty"] - 1, seed_id))
-
     pid = uid("plant")
-    exec1(conn,
-          "INSERT INTO plants(id,user_id,species,genome_json,age_days,health,generation,stage) VALUES(?,?,?,?,?,?,?,?)",
+    exec1(conn, "INSERT INTO plants(id,user_id,species,genome_json,age_days,health,generation,stage) VALUES(?,?,?,?,?,?,?,?)",
           (pid, player_id, lot["species"], lot["genome_json"], 0, 1.0, lot["generation"], "seedling"))
+    bind_plant_to_slot(conn, slot["id"], pid)
     conn.close()
     return RedirectResponse(url="/greenhouse", status_code=303)
 
@@ -68,16 +102,20 @@ async def plant_seed(request: Request, seed_id: str = Form(...)):
 async def tick(request: Request):
     player_id = request.state.player_id
     conn = get_conn()
-    # plants
+    # plants: env-aware tick
     plants = q(conn, "SELECT id, age_days, health FROM plants WHERE user_id=?", (player_id,))
     for p in plants:
-        new_age, new_health, new_stage = simple_tick(p["age_days"], p["health"])
+        env = get_env_for_plant(conn, player_id, p["id"])
+        new_age, new_health, new_stage = simple_tick(p["age_days"], p["health"], env)
         exec1(conn,
               "UPDATE plants SET age_days=?, health=?, stage=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
               (new_age, new_health, new_stage, p["id"]))
-    # fruits
+    # fruits: speed by env of mom plant's slot (approx)
     fruits = q(conn, "SELECT * FROM fruits WHERE user_id=? AND status='growing'", (player_id,))
     for f in fruits:
+        env = get_env_for_plant(conn, player_id, f["mom_id"])
+        # dynamic fruit time based on env
+        days_req = fruit_days_with_env(env)
         remain = int(f["days_remaining"]) - 1
         status = "ripe" if remain <= 0 else "growing"
         exec1(conn, "UPDATE fruits SET days_remaining=?, status=? WHERE id=?",
@@ -90,8 +128,10 @@ async def new_game(request: Request):
     player_id = request.state.player_id
     conn = get_conn()
     exec1(conn, "DELETE FROM plants WHERE user_id=?", (player_id,))
-    exec1(conn, "DELETE FROM seeds WHERE user_id=?", (player_id,))
+    exec1(conn, "DELETE FROM seeds  WHERE user_id=?", (player_id,))
     exec1(conn, "DELETE FROM fruits WHERE user_id=?", (player_id,))
+    exec1(conn, "DELETE FROM slots  WHERE user_id=?", (player_id,))
+    ensure_slots(conn, player_id, 6)
     grant_starter_pack(conn, player_id)
     conn.close()
     return RedirectResponse(url="/greenhouse", status_code=303)
@@ -190,9 +230,12 @@ async def pollinate(request: Request,
 
     qty = compute_lot_qty(float(mom["health"]), float(dad["health"]), mom["id"] == dad["id"])
     fruit_id = uid("fruit")
-    exec1(conn,
-          "INSERT INTO fruits(id,user_id,species,mom_id,dad_id,genome_json,qty,generation,days_remaining,status) VALUES(?,?,?,?,?,?,?,?,?,?)",
-          (fruit_id, player_id, mom["species"], mom["id"], dad["id"], json.dumps(child_g), qty, child_gen, GROWTH["fruit_days"], "growing"))
+    # fruit time based on env of mom slot
+    env = get_env_for_plant(conn, player_id, mom["id"])
+    days = fruit_days_with_env(env)
+    
+    exec1(conn, "INSERT INTO fruits(id,user_id,species,mom_id,dad_id,genome_json,qty,generation,days_remaining,status) VALUES(?,?,?,?,?,?,?,?,?,?)",
+          (uid("fruit"), player_id, mom["species"], mom["id"], dad["id"], json.dumps(child_g), qty, child_gen, days, "growing"))
     conn.close()
     return RedirectResponse(url="/breeding", status_code=303)
 

@@ -2,6 +2,53 @@
 {% block content %}
 <div class="grid">
   <section class="card">
+    <h2>Slots (Environment)</h2>
+    <p class="muted">Edit soil/light/water/temp. Plants planted use the first empty slot.</p>
+    <table class="table">
+      <thead><tr><th>#</th><th>Plant</th><th>Soil</th><th>Light</th><th>Water</th><th>Temp</th><th></th></tr></thead>
+      <tbody>
+      {% for s in slots %}
+        <tr>
+          <td class="mono">{{ loop.index }}</td>
+          <td class="mono">{{ s['plant_id'] or '—' }}</td>
+          <td>
+            <form action="/slot_update" method="post" class="inline">
+              <input type="hidden" name="slot_id" value="{{ s['id'] }}"/>
+              <select name="soil">
+                {% for v in ['loam','sand','clay'] %}
+                  <option value="{{ v }}" {% if s['soil']==v %}selected{% endif %}>{{ v }}</option>
+                {% endfor %}
+              </select>
+          </td>
+          <td>
+              <select name="light">
+                {% for v in ['low','med','high'] %}
+                  <option value="{{ v }}" {% if s['light']==v %}selected{% endif %}>{{ v }}</option>
+                {% endfor %}
+              </select>
+          </td>
+          <td>
+              <select name="water">
+                {% for v in ['under','ok','over'] %}
+                  <option value="{{ v }}" {% if s['water']==v %}selected{% endif %}>{{ v }}</option>
+                {% endfor %}
+              </select>
+          </td>
+          <td>
+              <select name="temp">
+                {% for v in ['cool','warm'] %}
+                  <option value="{{ v }}" {% if s['temp']==v %}selected{% endif %}>{{ v }}</option>
+                {% endfor %}
+              </select>
+          </td>
+          <td><button class="btn small" type="submit">Save</button></form></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card">
     <h2>Starter & Stored Seeds</h2>
     {% if seeds|length == 0 %}
       <p>No seeds. Start a <em>New Game</em> to get a starter pack.</p>
@@ -19,7 +66,7 @@
               {% if s['qty'] > 0 %}
               <form action="/plant_seed" method="post">
                 <input type="hidden" name="seed_id" value="{{ s['id'] }}"/>
-                <button class="btn" type="submit">Plant 1</button>
+                <button class="btn" type="submit">Plant 1 (first empty slot)</button>
               </form>
               {% else %}<span class="muted">Empty</span>{% endif %}
             </td>
@@ -42,9 +89,12 @@
             <strong>{{ p.species }} · {{ p.generation }}</strong>
             <span class="muted">Age {{ p.age_days }}d · {{ p.stage }} · Health {{ p.health }}</span>
           </div>
-          <div class="plant-body">
-            <div>Appearance: <strong>{{ p.appearance }}</strong></div>
-            <div>Height score: <strong>{{ p.height_score }}</strong></div>
+          <div class="plant-body" style="display:flex; gap:12px; align-items:center;">
+            <img alt="sprite" width="80" height="60" src="/sprite/{{ p.species|lower }}/{{ p.stage|lower }}.svg"/>
+            <div>
+              <div>Appearance: <strong>{{ p.appearance }}</strong></div>
+              <div>Height score: <strong>{{ p.height_score }}</strong></div>
+            </div>
           </div>
         </div>
         {% endfor %}
@@ -60,29 +110,27 @@
       <table class="table">
         <thead><tr><th>Species</th><th>Fruit ID</th><th>Gen</th><th>Qty</th><th>Status</th><th>Action</th></tr></thead>
         <tbody>
-        {% for f in fruits %}
-          <tr>
-            <td>{{ f['species'] }}</td>
-            <td class="mono">{{ f['id'] }}</td>
-            <td>{{ f['generation'] }}</td>
-            <td>{{ f['qty'] }}</td>
-            <td>
-              {% if f['status'] == 'growing' %}Growing ({{ f['days_remaining'] }}d)
-              {% elif f['status'] == 'ripe' %}Ripe
-              {% else %}Harvested{% endif %}
-            </td>
-            <td>
-              {% if f['status'] == 'ripe' %}
+          {% for f in fruits %}
+            <tr>
+              <td>{{ f['species'] }}</td>
+              <td class="mono">{{ f['id'] }}</td>
+              <td>{{ f['generation'] }}</td>
+              <td>{{ f['qty'] }}</td>
+              <td>
+                {% if f['status'] == 'growing' %}Growing ({{ f['days_remaining'] }}d)
+                {% elif f['status'] == 'ripe' %}Ripe
+                {% else %}Harvested{% endif %}
+              </td>
+              <td>
+                {% if f['status'] == 'ripe' %}
                 <form action="/harvest_fruit" method="post">
                   <input type="hidden" name="fruit_id" value="{{ f['id'] }}"/>
                   <button class="btn" type="submit">Harvest → Seeds</button>
                 </form>
-              {% else %}
-                <span class="muted">—</span>
-              {% endif %}
-            </td>
-          </tr>
-        {% endfor %}
+                {% else %}<span class="muted">—</span>{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
         </tbody>
       </table>
     {% endif %}

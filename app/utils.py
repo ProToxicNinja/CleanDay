@@ -10,10 +10,36 @@ SPECIES = ["Pea", "Tomato", "Marigold"]
 def uid(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:8]}"
 
+def ensure_slots(conn, user_id: str, n: int = 6):
+    rows = q(conn, "SELECT COUNT(*) AS c FROM slots WHERE user_id=?", (user_id,))
+    if rows[0]["c"] >= n: return
+    # create N default slots
+    for i in range(n - rows[0]["c"]):
+        exec1(conn, "INSERT INTO slots(id,user_id,soil,light,water,temp) VALUES(?,?,?,?,?,?)",
+              (uid("slot"), user_id, "loam","med","ok","warm"))
+
+def get_first_empty_slot(conn, user_id: str):
+    rows = q(conn, "SELECT * FROM slots WHERE user_id=? AND (plant_id IS NULL OR plant_id='') LIMIT 1", (user_id,))
+    return rows[0] if rows else None
+
+def bind_plant_to_slot(conn, slot_id: str, plant_id: str):
+    exec1(conn, "UPDATE slots SET plant_id=? WHERE id=?", (plant_id, slot_id))
+
+def unbind_plant_from_slot(conn, plant_id: str):
+    exec1(conn, "UPDATE slots SET plant_id=NULL WHERE plant_id=?", (plant_id,))
+
+def get_env_for_plant(conn, user_id: str, plant_id: str):
+    rows = q(conn, "SELECT soil, light, water, temp FROM slots WHERE user_id=? AND plant_id=?", (user_id, plant_id))
+    if not rows:
+        return {"soil":"loam","light":"med","water":"ok","temp":"warm"}
+    r = rows[0]
+    return {"soil":r["soil"],"light":r["light"],"water":r["water"],"temp":r["temp"]}
+
 def get_or_create_player() -> str:
     pid = uuid.uuid4().hex
     conn = get_conn()
     exec1(conn, "INSERT OR REPLACE INTO users(id, name) VALUES(?, ?)", (pid, f"Player-{pid[:4]}"))
+    ensure_slots(conn, pid, 6)
     rows = q(conn, "SELECT COUNT(*) AS c FROM seeds WHERE user_id=?", (pid,))
     if rows[0]["c"] == 0:
         grant_starter_pack(conn, pid)
@@ -62,12 +88,12 @@ def random_genome():
     return genome
 
 def grant_starter_pack(conn, user_id: str):
+    ensure_slots(conn, user_id, 6)
     for sp in SPECIES:
         genome = random_genome()
-        lot_id = uid("seed")
         exec1(conn,
-              "INSERT INTO seeds(id,user_id,species,genome_json,qty,generation,parents_json) VALUES(?,?,?,?,?,?,?)",
-              (lot_id, user_id, sp, json.dumps(genome), 10, "F1", json.dumps({"mom": None, "dad": None})))
+          "INSERT INTO seeds(id,user_id,species,genome_json,qty,generation,parents_json) VALUES(?,?,?,?,?,?,?)",
+          (uid("seed"), user_id, sp, json.dumps(genome), 10, "F1", json.dumps({"mom": None, "dad": None})))
 
 def express_phenotype(genome: dict):
     color = "white"

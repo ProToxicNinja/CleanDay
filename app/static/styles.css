@@ -48,3 +48,32 @@ a { color: var(--acc); text-decoration: none; }
 
 .breed-form .row { margin-bottom: 8px; }
 #preview { margin: 8px 0 12px 0; }
+
+/* Environment controls */
+form.inline { display: contents; }
+select, input[type="text"] {
+  background: var(--card);
+  color: var(--fg);
+  border: 1px solid #2a2f45;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+select:focus, input:focus {
+  outline: none;
+  border-color: var(--acc);
+}
+.table select {
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+/* Grid system for slots layout */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+  gap: 16px;
+}
+@media (max-width: 900px) {
+  .grid { grid-template-columns: 1fr; }
+}
