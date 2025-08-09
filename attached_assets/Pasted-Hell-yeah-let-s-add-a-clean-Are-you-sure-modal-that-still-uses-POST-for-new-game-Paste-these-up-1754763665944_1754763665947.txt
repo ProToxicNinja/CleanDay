@@ -1,0 +1,117 @@
+Hell yeah—let’s add a clean “Are you sure?” modal that still uses POST for /new_game. Paste these updates exactly where noted.
+
+
+---
+
+1) Update the nav button to open a modal
+
+File: app/templates/base.html
+Change: replace the existing New Game form with this button, and add a modal mount at the end of <body>.
+
+<!-- replace the old New Game form in the header nav -->
+<form action="/tick" method="post" style="display:inline;">
+  <button class="btn small" type="submit">Tick +1 Day</button>
+</form>
+
+<!-- NEW: modal opener (uses HTMX GET to fetch the modal markup) -->
+<button
+  class="btn small danger"
+  hx-get="/confirm_new_game"
+  hx-target="#modal"
+  hx-swap="innerHTML"
+  type="button"
+>New Game</button>
+
+Now, before the closing </body>, add a modal host container:
+
+<div id="modal"></div>  <!-- HTMX will inject the modal here -->
+</body>
+</html>
+
+(Leave everything else in base.html as-is.)
+
+
+---
+
+2) Add two tiny routes for the modal
+
+File: app/routes/game.py
+Add these two endpoints anywhere below your other route definitions (keep your existing @router.post("/new_game") as-is):
+
+from fastapi.responses import HTMLResponse
+
+@router.get("/confirm_new_game", response_class=HTMLResponse)
+async def confirm_new_game(_: Request):
+    # Returns a small HTML fragment injected by HTMX into #modal
+    return """
+<div class="modal-overlay" onclick="if(event.target.classList.contains('modal-overlay')) this.innerHTML=''">
+  <div class="modal">
+    <h3>Start a new game?</h3>
+    <p>This will <strong>clear all your plants and seeds</strong> and grant a fresh starter pack.</p>
+    <div class="modal-actions">
+      <form action="/new_game" method="post" style="display:inline;">
+        <button class="btn danger" type="submit">Yes, wipe it</button>
+      </form>
+      <button class="btn" type="button"
+              hx-get="/modal_clear" hx-target="#modal" hx-swap="innerHTML">Cancel</button>
+    </div>
+  </div>
+</div>
+"""
+
+@router.get("/modal_clear", response_class=HTMLResponse)
+async def modal_clear():
+    # Clears the modal host div
+    return ""
+
+Notes:
+
+Clicking the dim overlay outside the modal also closes it (that onclick handler nukes the innerHTML).
+
+The Yes button submits a POST to /new_game (your existing logic runs).
+
+Cancel calls /modal_clear which empties #modal.
+
+
+
+---
+
+3) Add some lightweight modal styles
+
+File: app/static/styles.css
+Append this to the end of the file:
+
+/* Modal */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: grid; place-items: center;
+  z-index: 9999;
+}
+.modal {
+  background: var(--card);
+  border: 1px solid #2a2f45;
+  border-radius: 16px;
+  max-width: 460px;
+  width: calc(100% - 32px);
+  padding: 16px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+}
+.modal h3 { margin: 0 0 8px 0; }
+.modal p { margin: 0 0 16px 0; color: var(--muted); }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+
+
+---
+
+How it behaves now
+
+Click New Game → modal pops.
+
+Yes, wipe it → sends POST to /new_game, resets inventory, seed pack granted, redirects back.
+
+Cancel or click outside the box → closes the modal without doing anything.
+
+
+If you want the modal to also show how many plants/seeds you currently have before wiping, I can add a quick count to that GET endpoint so it says “This will delete X plants, Y seed lots.” Say the word.
+

@@ -145,3 +145,29 @@ async def pollinate(request: Request,
           (lot_id, player_id, mom["species"], json.dumps(child_g), max(2, min(24, lot_size)), child_gen, json.dumps(parents)))
     conn.close()
     return RedirectResponse(url="/breeding", status_code=303)
+
+# ---------- Modal Routes ----------
+
+@router.get("/confirm_new_game", response_class=HTMLResponse)
+async def confirm_new_game(_: Request):
+    # Returns a small HTML fragment injected by HTMX into #modal
+    return """
+<div class="modal-overlay" onclick="if(event.target.classList.contains('modal-overlay')) this.innerHTML=''">
+  <div class="modal">
+    <h3>Start a new game?</h3>
+    <p>This will <strong>clear all your plants and seeds</strong> and grant a fresh starter pack.</p>
+    <div class="modal-actions">
+      <form action="/new_game" method="post" style="display:inline;">
+        <button class="btn danger" type="submit">Yes, wipe it</button>
+      </form>
+      <button class="btn" type="button"
+              hx-get="/modal_clear" hx-target="#modal" hx-swap="innerHTML">Cancel</button>
+    </div>
+  </div>
+</div>
+"""
+
+@router.get("/modal_clear", response_class=HTMLResponse)
+async def modal_clear():
+    # Clears the modal host div
+    return ""

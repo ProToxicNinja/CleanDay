@@ -25,3 +25,23 @@ a { color: var(--acc); text-decoration: none; }
 .plant { background:#141722; border:1px solid #21253a; border-radius:14px; padding:12px; }
 .plant-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
 .footer { text-align:center; color:var(--muted); padding:12px 0 24px; }
+
+/* Modal */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: grid; place-items: center;
+  z-index: 9999;
+}
+.modal {
+  background: var(--card);
+  border: 1px solid #2a2f45;
+  border-radius: 16px;
+  max-width: 460px;
+  width: calc(100% - 32px);
+  padding: 16px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+}
+.modal h3 { margin: 0 0 8px 0; }
+.modal p { margin: 0 0 16px 0; color: var(--muted); }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
