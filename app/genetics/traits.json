@@ -4,7 +4,10 @@
       "id": "petal_color",
       "type": "mendelian",
       "loci": ["C"],
-      "alleles": { "C": "color", "c": "white" },
+      "alleles": {
+        "C": { "label": "color", "p": 0.7 },
+        "c": { "label": "white", "p": 0.3 }
+      },
       "dominance": ["C", "c"]
     },
     {
@@ -12,8 +15,8 @@
       "type": "polygenic",
       "loci": ["H1", "H2", "H3", "H4"],
       "alleles": {
-        "H+": { "code": "H+", "value": 1 },
-        "h":  { "code": "h",  "value": 0 }
+        "H+": { "code": "H+", "value": 1, "p": 0.55 },
+        "h":  { "code": "h",  "value": 0, "p": 0.45 }
       }
     },
     {
@@ -21,8 +24,8 @@
       "type": "epistatic",
       "loci": ["VAR"],
       "alleles": {
-        "V": { "code": "V", "effect": "no_variegation" },
-        "v": { "code": "v", "effect": "variegation_if_homozygous" }
+        "V": { "code": "V", "effect": "no_variegation", "p": 0.85 },
+        "v": { "code": "v", "effect": "variegation_if_homozygous", "p": 0.15 }
       }
     }
   ]

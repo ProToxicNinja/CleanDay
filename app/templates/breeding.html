@@ -3,8 +3,8 @@
 <div class="grid">
   <section class="card">
     <h2>Breeding Room</h2>
-    {% if plants|length < 1 %}
-      <p>Plant something first 🙂</p>
+    {% if plants|length < 2 %}
+      <p>You need at least two plants of the <em>same species</em> to breed.</p>
     {% else %}
       <form action="/pollinate" method="post" class="breed-form">
         <div class="row">
@@ -22,7 +22,6 @@
               <option value="{{ p.id }}">{{ p.species }} · {{ p.generation }} · {{ p.appearance }} · H{{ p.height_score }} ({{ p.id }})</option>
             {% endfor %}
           </select>
-          <small class="muted">Selfing allowed (select the same plant in both lists).</small>
         </div>
         <div class="row">
           <label>Lot Size</label>
@@ -47,7 +46,14 @@
               <td class="mono">{{ s['id'] }}</td>
               <td>{{ s['qty'] }}</td>
               <td>{{ s['generation'] }}</td>
-              <td class="mono">{{ s['parents_json'] or "—" }}</td>
+              <td class="mono">
+                {% if s['parents_json'] %}
+                  {% set pj = s['parents_json'] | tojson %}
+                  {{ s['parents_json'] }}
+                {% else %}
+                  —
+                {% endif %}
+              </td>
             </tr>
           {% endfor %}
         </tbody>

@@ -2,7 +2,7 @@
 {% block content %}
 <div class="grid">
   <section class="card">
-    <h2>Starter Seeds</h2>
+    <h2>Starter & Stored Seeds</h2>
     {% if seeds|length == 0 %}
       <p>No seeds. Start a <em>New Game</em> to get a starter pack.</p>
     {% else %}
@@ -21,9 +21,7 @@
                 <input type="hidden" name="seed_id" value="{{ s['id'] }}"/>
                 <button class="btn" type="submit">Plant 1</button>
               </form>
-              {% else %}
-                <span class="muted">Empty</span>
-              {% endif %}
+              {% else %}<span class="muted">Empty</span>{% endif %}
             </td>
           </tr>
         {% endfor %}
@@ -35,13 +33,13 @@
   <section class="card">
     <h2>Greenhouse</h2>
     {% if plants|length == 0 %}
-      <p>No plants yet. Plant a seed from your starter pack.</p>
+      <p>No plants yet. Plant a seed from your seeds list.</p>
     {% else %}
       <div class="cards">
         {% for p in plants %}
         <div class="plant">
           <div class="plant-head">
-            <strong>{{ p.species }}</strong>
+            <strong>{{ p.species }} · {{ p.generation }}</strong>
             <span class="muted">Age {{ p.age_days }}d · Health {{ p.health }}</span>
           </div>
           <div class="plant-body">

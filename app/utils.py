@@ -20,6 +20,17 @@ def get_or_create_player() -> str:
     conn.close()
     return pid
 
+def _wchoice(pairs):
+    # pairs: list[(value, weight)], weights needn't sum to 1
+    total = sum(w for _, w in pairs)
+    r = random.random() * total
+    acc = 0.0
+    for v, w in pairs:
+        acc += w
+        if r <= acc:
+            return v
+    return pairs[-1][0]
+
 def random_genome():
     genome = {}
     for trait in TRAITS["traits"]:
@@ -27,19 +38,27 @@ def random_genome():
         if t == "mendelian":
             locus = trait["loci"][0]
             dom, rec = trait["dominance"]
-            a1 = random.choice([dom, rec])
-            a2 = random.choice([dom, rec])
+            p_dom = trait["alleles"][dom]["p"]
+            p_rec = trait["alleles"][rec]["p"]
+            a1 = _wchoice([(dom, p_dom), (rec, p_rec)])
+            a2 = _wchoice([(dom, p_dom), (rec, p_rec)])
             genome[locus] = [a1, a2]
+
         elif t == "polygenic":
+            p_plus = trait["alleles"]["H+"]["p"]
+            p_min  = trait["alleles"]["h"]["p"]
             for locus in trait["loci"]:
-                aplus = trait["alleles"]["H+"]["code"]
-                aminus = trait["alleles"]["h"]["code"]
-                genome[locus] = [random.choice([aplus, aminus]), random.choice([aplus, aminus])]
+                a1 = _wchoice([("H+", p_plus), ("h", p_min)])
+                a2 = _wchoice([("H+", p_plus), ("h", p_min)])
+                genome[locus] = [a1, a2]
+
         elif t == "epistatic":
             locus = trait["loci"][0]
-            a_on = trait["alleles"]["V"]["code"]
-            a_off = trait["alleles"]["v"]["code"]
-            genome[locus] = [random.choice([a_on, a_off]), random.choice([a_on, a_off])]
+            p_on  = trait["alleles"]["V"]["p"]
+            p_off = trait["alleles"]["v"]["p"]
+            a1 = _wchoice([("V", p_on), ("v", p_off)])
+            a2 = _wchoice([("V", p_on), ("v", p_off)])
+            genome[locus] = [a1, a2]
     return genome
 
 def grant_starter_pack(conn, user_id: str):
@@ -47,8 +66,8 @@ def grant_starter_pack(conn, user_id: str):
         genome = random_genome()
         lot_id = uid("seed")
         exec1(conn,
-              "INSERT INTO seeds(id,user_id,species,genome_json,qty,generation) VALUES(?,?,?,?,?,?)",
-              (lot_id, user_id, sp, json.dumps(genome), 10, "F1"))
+              "INSERT INTO seeds(id,user_id,species,genome_json,qty,generation,parents_json) VALUES(?,?,?,?,?,?,?)",
+              (lot_id, user_id, sp, json.dumps(genome), 10, "F1", json.dumps({"mom": None, "dad": None})))
 
 def express_phenotype(genome: dict):
     color = "white"
@@ -78,3 +97,12 @@ def express_phenotype(genome: dict):
 
     appearance = "variegated " + color if variegation else color
     return { "appearance": appearance, "height_score": height_score }
+
+def next_generation_label(gen: str | None) -> str:
+    try:
+        if not gen or not gen.upper().startswith("F"):
+            return "F1"
+        n = int(gen[1:])
+        return f"F{n+1}"
+    except:
+        return "F1"
