@@ -1,0 +1,663 @@
+You got it. Here’s the clean Day-1 scaffold—fixed, minimal, and ready for Codex/Replit. Paste this whole thing into a new GitHub repo exactly as shown.
+
+
+---
+
+Repo Layout
+
+plant-breeder-sim/
+├─ README.md
+├─ requirements.txt
+├─ .gitignore
+├─ .replit
+├─ replit.nix
+└─ app/
+   ├─ __init__.py
+   ├─ main.py
+   ├─ db.py
+   ├─ models.py
+   ├─ utils.py
+   ├─ genetics/
+   │  ├─ __init__.py
+   │  ├─ traits.json
+   │  └─ engine.py
+   ├─ routes/
+   │  ├─ __init__.py
+   │  └─ game.py
+   ├─ templates/
+   │  ├─ base.html
+   │  ├─ index.html
+   │  └─ greenhouse.html
+   └─ static/
+      └─ styles.css
+
+
+---
+
+README.md
+
+# Plant Breeder Sim — Day 1
+
+Minimal playable scaffold:
+- FastAPI + SQLite
+- Jinja2 + HTMX via CDN (no frontend build)
+- Starter seeds → plant → tick → view greenhouse
+
+## Quickstart (Local)
+```bash
+python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+
+Open http://127.0.0.1:8000
+
+Replit
+
+Import this repo
+
+Click Run (uses .replit)
+
+
+Day 1 Features
+
+Auto-creates a player (signed cookie)
+
+Grants a starter seed pack (3 lots)
+
+Plant seeds into greenhouse
+
+Advance time with Tick (1 in-game day)
+
+Plants age & show basic phenotypes
+
+
+Next (Day 2)
+
+Breeding (pollinate two plants → seed lots)
+
+Harvest & inventory improvements
+
+Basic stability/purity preview
+
+
+---
+
+## `.gitignore`
+```gitignore
+__pycache__/
+*.pyc
+.venv/
+env/
+*.db
+*.sqlite
+
+
+---
+
+.replit
+
+run = "uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+
+---
+
+replit.nix
+
+{ pkgs }: {
+  deps = [
+    pkgs.python311
+    pkgs.python311Packages.pip
+    pkgs.python311Packages.setuptools
+    pkgs.python311Packages.wheel
+  ];
+}
+
+
+---
+
+requirements.txt
+
+fastapi==0.112.2
+uvicorn==0.30.6
+jinja2==3.1.4
+python-multipart==0.0.9
+pydantic==2.8.2
+itsdangerous==2.2.0
+
+
+---
+
+app/__init__.py
+
+# empty to mark package
+
+
+---
+
+app/main.py
+
+from fastapi import FastAPI, Request, Response
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, RedirectResponse
+from starlette.middleware.sessions import SessionMiddleware
+from itsdangerous import Signer, BadSignature
+
+from app.db import init_db
+from app.routes.game import router as game_router
+from app.utils import get_or_create_player
+
+app = FastAPI(title="Plant Breeder Sim - Day 1")
+
+# Static files
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+# Signed cookie for player_id
+SECRET = "change-me-in-production"
+app.add_middleware(SessionMiddleware, secret_key=SECRET)
+
+@app.on_event("startup")
+def on_startup():
+    init_db()
+
+@app.middleware("http")
+async def ensure_player(request: Request, call_next):
+    signer = Signer(SECRET)
+    signed_pid = request.cookies.get("player_id")
+
+    if not signed_pid:
+        new_id = get_or_create_player()
+        response: Response = await call_next(request)
+        response.set_cookie("player_id", signer.sign(new_id.encode()).decode(), httponly=True, samesite="lax")
+        return response
+    else:
+        try:
+            pid = signer.unsign(signed_pid.encode()).decode()
+            request.state.player_id = pid
+        except BadSignature:
+            new_id = get_or_create_player()
+            request.state.player_id = new_id
+            response: Response = await call_next(request)
+            response.set_cookie("player_id", signer.sign(new_id.encode()).decode(), httponly=True, samesite="lax")
+            return response
+
+    return await call_next(request)
+
+@app.get("/", response_class=HTMLResponse)
+async def index(_: Request):
+    return RedirectResponse(url="/greenhouse")
+
+app.include_router(game_router)
+
+
+---
+
+app/db.py
+
+import sqlite3
+from pathlib import Path
+from typing import List
+
+DB_PATH = Path("game.sqlite")
+
+SCHEMA = """
+PRAGMA journal_mode=WAL;
+
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  name TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS seeds (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  species TEXT NOT NULL,
+  genome_json TEXT NOT NULL,
+  qty INTEGER NOT NULL,
+  generation TEXT DEFAULT 'F1',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS plants (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  species TEXT NOT NULL,
+  genome_json TEXT NOT NULL,
+  age_days INTEGER NOT NULL DEFAULT 0,
+  health REAL NOT NULL DEFAULT 1.0,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+"""
+
+def get_conn() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    conn = get_conn()
+    with conn:
+        conn.executescript(SCHEMA)
+    conn.close()
+
+def q(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> List[sqlite3.Row]:
+    cur = conn.execute(sql, params)
+    return cur.fetchall()
+
+def exec1(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> None:
+    conn.execute(sql, params)
+    conn.commit()
+
+
+---
+
+app/models.py
+
+from pydantic import BaseModel
+
+class SeedLot(BaseModel):
+    id: str
+    user_id: str
+    species: str
+    genome_json: str
+    qty: int
+    generation: str
+
+class Plant(BaseModel):
+    id: str
+    user_id: str
+    species: str
+    genome_json: str
+    age_days: int
+    health: float
+
+
+---
+
+app/utils.py
+
+import json, uuid, random
+from pathlib import Path
+from app.db import get_conn, exec1, q
+
+TRAITS_PATH = Path("app/genetics/traits.json")
+TRAITS = json.loads(TRAITS_PATH.read_text())
+
+SPECIES = ["Pea", "Tomato", "Marigold"]
+
+def uid(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:8]}"
+
+def get_or_create_player() -> str:
+    pid = uuid.uuid4().hex
+    conn = get_conn()
+    exec1(conn, "INSERT OR REPLACE INTO users(id, name) VALUES(?, ?)", (pid, f"Player-{pid[:4]}"))
+    rows = q(conn, "SELECT COUNT(*) AS c FROM seeds WHERE user_id=?", (pid,))
+    if rows[0]["c"] == 0:
+        grant_starter_pack(conn, pid)
+    conn.close()
+    return pid
+
+def random_genome():
+    genome = {}
+    for trait in TRAITS["traits"]:
+        t = trait["type"]
+        if t == "mendelian":
+            locus = trait["loci"][0]
+            dom, rec = trait["dominance"]
+            a1 = random.choice([dom, rec])
+            a2 = random.choice([dom, rec])
+            genome[locus] = [a1, a2]
+        elif t == "polygenic":
+            for locus in trait["loci"]:
+                aplus = trait["alleles"]["H+"]["code"]
+                aminus = trait["alleles"]["h"]["code"]
+                genome[locus] = [random.choice([aplus, aminus]), random.choice([aplus, aminus])]
+        elif t == "epistatic":
+            locus = trait["loci"][0]
+            a_on = trait["alleles"]["V"]["code"]
+            a_off = trait["alleles"]["v"]["code"]
+            genome[locus] = [random.choice([a_on, a_off]), random.choice([a_on, a_off])]
+    return genome
+
+def grant_starter_pack(conn, user_id: str):
+    for sp in SPECIES:
+        genome = random_genome()
+        lot_id = uid("seed")
+        exec1(conn,
+              "INSERT INTO seeds(id,user_id,species,genome_json,qty,generation) VALUES(?,?,?,?,?,?)",
+              (lot_id, user_id, sp, json.dumps(genome), 10, "F1"))
+
+def express_phenotype(genome: dict):
+    color = "white"
+    variegation = False
+    height_score = 0
+
+    for trait in TRAITS["traits"]:
+        ttype = trait["type"]
+        if ttype == "mendelian" and trait["id"] == "petal_color":
+            locus = trait["loci"][0]
+            dom, rec = trait["dominance"]
+            alleles = genome.get(locus, [rec, rec])
+            color = "colored" if dom in alleles else "white"
+
+        if ttype == "epistatic" and trait["id"] == "variegation":
+            locus = trait["loci"][0]
+            a_on = trait["alleles"]["V"]["code"]
+            alleles = genome.get(locus, [a_on, a_on])
+            variegation = (alleles[0] == "v" and alleles[1] == "v")
+
+        if ttype == "polygenic" and trait["id"] == "height":
+            total = 0
+            for locus in trait["loci"]:
+                a = genome.get(locus, ["h","h"])
+                total += (1 if a[0] == "H+" else 0) + (1 if a[1] == "H+" else 0)
+            height_score = total
+
+    appearance = "variegated " + color if variegation else color
+    return { "appearance": appearance, "height_score": height_score }
+
+
+---
+
+app/genetics/__init__.py
+
+# empty to mark package
+
+
+---
+
+app/genetics/traits.json
+
+{
+  "traits": [
+    {
+      "id": "petal_color",
+      "type": "mendelian",
+      "loci": ["C"],
+      "alleles": { "C": "color", "c": "white" },
+      "dominance": ["C", "c"]
+    },
+    {
+      "id": "height",
+      "type": "polygenic",
+      "loci": ["H1", "H2", "H3", "H4"],
+      "alleles": {
+        "H+": { "code": "H+", "value": 1 },
+        "h":  { "code": "h",  "value": 0 }
+      }
+    },
+    {
+      "id": "variegation",
+      "type": "epistatic",
+      "loci": ["VAR"],
+      "alleles": {
+        "V": { "code": "V", "effect": "no_variegation" },
+        "v": { "code": "v", "effect": "variegation_if_homozygous" }
+      }
+    }
+  ]
+}
+
+
+---
+
+app/genetics/engine.py
+
+from typing import Tuple
+
+def simple_tick(age_days: int, health: float) -> Tuple[int, float]:
+    """
+    Day 1: plants just age; mild health decay with age.
+    """
+    age_days += 1
+    health = max(0.0, min(1.0, health - 0.005))
+    return age_days, health
+
+
+---
+
+app/routes/__init__.py
+
+# empty to mark package
+
+
+---
+
+app/routes/game.py
+
+import json
+from fastapi import APIRouter, Request, Form
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
+from app.db import get_conn, q, exec1
+from app.utils import uid, express_phenotype
+from app.genetics.engine import simple_tick
+
+templates = Jinja2Templates(directory="app/templates")
+router = APIRouter()
+
+@router.get("/greenhouse", response_class=HTMLResponse)
+async def greenhouse(request: Request):
+    player_id = request.state.player_id
+    conn = get_conn()
+    plants = q(conn, "SELECT * FROM plants WHERE user_id=? ORDER BY created_at DESC", (player_id,))
+    seeds = q(conn, "SELECT * FROM seeds WHERE user_id=? ORDER BY species", (player_id,))
+
+    plant_cards = []
+    for row in plants:
+        genome = json.loads(row["genome_json"])
+        pheno = express_phenotype(genome)
+        plant_cards.append({
+            "id": row["id"],
+            "species": row["species"],
+            "age_days": row["age_days"],
+            "health": round(row["health"], 3),
+            "appearance": pheno["appearance"],
+            "height_score": pheno["height_score"]
+        })
+    conn.close()
+    return templates.TemplateResponse("greenhouse.html", {
+        "request": request,
+        "plants": plant_cards,
+        "seeds": seeds
+    })
+
+@router.post("/plant_seed")
+async def plant_seed(request: Request, seed_id: str = Form(...)):
+    player_id = request.state.player_id
+    conn = get_conn()
+    rows = q(conn, "SELECT * FROM seeds WHERE id=? AND user_id=?", (seed_id, player_id))
+    if not rows:
+        conn.close()
+        return RedirectResponse(url="/greenhouse", status_code=303)
+    lot = rows[0]
+    if lot["qty"] <= 0:
+        conn.close()
+        return RedirectResponse(url="/greenhouse", status_code=303)
+
+    exec1(conn, "UPDATE seeds SET qty=? WHERE id=?", (lot["qty"] - 1, seed_id))
+
+    pid = uid("plant")
+    exec1(conn,
+          "INSERT INTO plants(id,user_id,species,genome_json,age_days,health) VALUES(?,?,?,?,?,?)",
+          (pid, player_id, lot["species"], lot["genome_json"], 0, 1.0))
+    conn.close()
+    return RedirectResponse(url="/greenhouse", status_code=303)
+
+@router.post("/tick")
+async def tick(request: Request):
+    player_id = request.state.player_id
+    conn = get_conn()
+    plants = q(conn, "SELECT id, age_days, health FROM plants WHERE user_id=?", (player_id,))
+    for p in plants:
+        new_age, new_health = simple_tick(p["age_days"], p["health"])
+        exec1(conn,
+              "UPDATE plants SET age_days=?, health=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+              (new_age, new_health, p["id"]))
+    conn.close()
+    return RedirectResponse(url="/greenhouse", status_code=303)
+
+@router.post("/new_game")
+async def new_game(request: Request):
+    from app.utils import get_or_create_player
+    player_id = request.state.player_id
+    conn = get_conn()
+    exec1(conn, "DELETE FROM plants WHERE user_id=?", (player_id,))
+    exec1(conn, "DELETE FROM seeds WHERE user_id=?", (player_id,))
+    _ = get_or_create_player()
+    conn.close()
+    return RedirectResponse(url="/greenhouse", status_code=303)
+
+
+---
+
+app/templates/base.html
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Plant Breeder Sim — Day 1</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="stylesheet" href="/static/styles.css">
+  <!-- HTMX (CDN) -->
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+</head>
+<body>
+  <header class="topbar">
+    <h1>🌱 Plant Breeder Sim</h1>
+    <nav>
+      <a href="/greenhouse">Greenhouse</a>
+      <form action="/tick" method="post" style="display:inline;">
+        <button class="btn small" type="submit">Tick +1 Day</button>
+      </form>
+      <form action="/new_game" method="post" style="display:inline;">
+        <button class="btn small danger" type="submit">New Game</button>
+      </form>
+    </nav>
+  </header>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="footer">Day 1 prototype — no market yet.</footer>
+</body>
+</html>
+
+
+---
+
+app/templates/index.html
+
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>Welcome</h2>
+  <p>Head to your <a href="/greenhouse">Greenhouse</a> to start planting.</p>
+</div>
+{% endblock %}
+
+
+---
+
+app/templates/greenhouse.html
+
+{% extends "base.html" %}
+{% block content %}
+<div class="grid">
+  <section class="card">
+    <h2>Starter Seeds</h2>
+    {% if seeds|length == 0 %}
+      <p>No seeds. Start a <em>New Game</em> to get a starter pack.</p>
+    {% else %}
+      <table class="table">
+        <thead><tr><th>Species</th><th>Lot ID</th><th>Qty</th><th>Gen</th><th>Action</th></tr></thead>
+        <tbody>
+        {% for s in seeds %}
+          <tr>
+            <td>{{ s['species'] }}</td>
+            <td class="mono">{{ s['id'] }}</td>
+            <td>{{ s['qty'] }}</td>
+            <td>{{ s['generation'] }}</td>
+            <td>
+              {% if s['qty'] > 0 %}
+              <form action="/plant_seed" method="post">
+                <input type="hidden" name="seed_id" value="{{ s['id'] }}"/>
+                <button class="btn" type="submit">Plant 1</button>
+              </form>
+              {% else %}
+                <span class="muted">Empty</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Greenhouse</h2>
+    {% if plants|length == 0 %}
+      <p>No plants yet. Plant a seed from your starter pack.</p>
+    {% else %}
+      <div class="cards">
+        {% for p in plants %}
+        <div class="plant">
+          <div class="plant-head">
+            <strong>{{ p.species }}</strong>
+            <span class="muted">Age {{ p.age_days }}d · Health {{ p.health }}</span>
+          </div>
+          <div class="plant-body">
+            <div>Appearance: <strong>{{ p.appearance }}</strong></div>
+            <div>Height score: <strong>{{ p.height_score }}</strong></div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+
+---
+
+app/static/styles.css
+
+:root { --bg:#0e0f12; --card:#171921; --fg:#e6e7eb; --muted:#9aa0ae; --acc:#7bd389; --danger:#ea6b6b; }
+* { box-sizing: border-box; }
+body { margin:0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial; background:var(--bg); color:var(--fg); }
+a { color: var(--acc); text-decoration: none; }
+.container { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+
+.topbar { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; background:#12141a; border-bottom:1px solid #1e2230; }
+.topbar h1 { margin:0; font-size: 18px; }
+.topbar nav a { margin-right:12px; }
+.btn { background: var(--acc); color:#0a0a0a; border:0; padding:8px 12px; border-radius:10px; cursor:pointer; font-weight:600; }
+.btn.small { padding:6px 10px; font-size: 12px; }
+.btn.danger { background: var(--danger); color:#fff; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+.grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+.card { background: var(--card); border:1px solid #24283a; border-radius:16px; padding:16px; }
+.table { width:100%; border-collapse: collapse; }
+.table th, .table td { padding:8px; border-bottom:1px solid #22263a; text-align:left; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+.muted { color: var(--muted); }
+
+.cards { display:grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap:12px; }
+.plant { background:#141722; border:1px solid #21253a; border-radius:14px; padding:12px; }
+.plant-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+.footer { text-align:center; color:var(--muted); padding:12px 0 24px; }
+
+
+---
+
+That’s the whole Day-1 package, corrected. Commit → push → import to Replit → run. If anything barks, tell me the error text and I’ll fix it fast.
+
