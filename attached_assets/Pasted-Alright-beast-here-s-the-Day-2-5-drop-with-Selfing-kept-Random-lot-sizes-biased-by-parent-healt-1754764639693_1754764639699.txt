@@ -1,0 +1,787 @@
+Alright, beast—here’s the Day-2.5 drop with:
+
+Selfing kept
+
+Random lot sizes (biased by parent health)
+
+Growth stages (seedling → juvenile → mature → flowering → spent)
+
+Breeding gated to flowering only
+
+Fruit/Pods system: pollinate ⇒ fruit grows over days ⇒ manual harvest produces the seed lot
+
+Genetics UX: quick preview (dominant color %, variegation %, expected height) and a stability % estimate from parents
+
+UI sections for Fruits & Pods and preview
+
+
+Paste these over your current files.
+
+
+---
+
+app/db.py (add fruits table + keep migrations)
+
+import sqlite3
+from pathlib import Path
+from typing import List
+
+DB_PATH = Path("game.sqlite")
+
+SCHEMA = """
+PRAGMA journal_mode=WAL;
+
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  name TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS seeds (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  species TEXT NOT NULL,
+  genome_json TEXT NOT NULL,
+  qty INTEGER NOT NULL,
+  generation TEXT DEFAULT 'F1',
+  parents_json TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS plants (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  species TEXT NOT NULL,
+  genome_json TEXT NOT NULL,
+  age_days INTEGER NOT NULL DEFAULT 0,
+  health REAL NOT NULL DEFAULT 1.0,
+  generation TEXT DEFAULT 'F1',
+  stage TEXT DEFAULT 'seedling',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS fruits (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  species TEXT NOT NULL,
+  mom_id TEXT NOT NULL,
+  dad_id TEXT NOT NULL,
+  genome_json TEXT NOT NULL,
+  qty INTEGER NOT NULL,
+  generation TEXT NOT NULL,
+  days_remaining INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'growing', -- growing | ripe | harvested
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+"""
+
+def get_conn() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    conn = get_conn()
+    with conn:
+        conn.executescript(SCHEMA)
+        # Migrations if older DB exists
+        try:
+            conn.execute("ALTER TABLE plants ADD COLUMN generation TEXT DEFAULT 'F1'")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE seeds ADD COLUMN parents_json TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE plants ADD COLUMN stage TEXT DEFAULT 'seedling'")
+        except sqlite3.OperationalError:
+            pass
+        # fruits table creation handled by SCHEMA above
+    conn.close()
+
+def q(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> List[sqlite3.Row]:
+    return conn.execute(sql, params).fetchall()
+
+def exec1(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> None:
+    conn.execute(sql, params)
+    conn.commit()
+
+
+---
+
+app/genetics/engine.py (growth stages + recombination)
+
+from typing import Tuple, Dict, List
+import random
+
+# Simple species growth model (same for all species for now)
+GROWTH = {
+    "stage_thresholds": {  # age_days at which stage starts
+        "seedling": 0,
+        "juvenile": 3,
+        "mature": 7,
+        "flowering": 9,
+        "spent": 18
+    },
+    "fruit_days": 4  # days from pollination to ripe fruit
+}
+
+def compute_stage(age_days: int) -> str:
+    t = GROWTH["stage_thresholds"]
+    if age_days >= t["spent"]: return "spent"
+    if age_days >= t["flowering"]: return "flowering"
+    if age_days >= t["mature"]: return "mature"
+    if age_days >= t["juvenile"]: return "juvenile"
+    return "seedling"
+
+def simple_tick(age_days: int, health: float) -> Tuple[int, float, str]:
+    """
+    Tick a plant: age + health decay + stage update.
+    """
+    age_days += 1
+    # gentle decay; mature/flowering a tad faster
+    stage = compute_stage(age_days)
+    decay = 0.003 if stage in ("seedling", "juvenile") else 0.006
+    health = max(0.0, min(1.0, health - decay))
+    return age_days, health, stage
+
+def recombine_genomes(mom: Dict[str, List[str]], dad: Dict[str, List[str]]) -> Dict[str, List[str]]:
+    child = {}
+    all_loci = set(mom.keys()) | set(dad.keys())
+    for locus in all_loci:
+        m_alleles = mom.get(locus) or dad.get(locus) or ["h","h"]
+        d_alleles = dad.get(locus) or mom.get(locus) or ["h","h"]
+        a1 = random.choice(m_alleles)
+        a2 = random.choice(d_alleles)
+        child[locus] = [a1, a2]
+    return child
+
+
+---
+
+app/utils.py (random lot size + genetics UX helpers)
+
+import json, uuid, random
+from pathlib import Path
+from app.db import get_conn, exec1, q
+
+TRAITS_PATH = Path("app/genetics/traits.json")
+TRAITS = json.loads(TRAITS_PATH.read_text())
+
+SPECIES = ["Pea", "Tomato", "Marigold"]
+
+def uid(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:8]}"
+
+def get_or_create_player() -> str:
+    pid = uuid.uuid4().hex
+    conn = get_conn()
+    exec1(conn, "INSERT OR REPLACE INTO users(id, name) VALUES(?, ?)", (pid, f"Player-{pid[:4]}"))
+    rows = q(conn, "SELECT COUNT(*) AS c FROM seeds WHERE user_id=?", (pid,))
+    if rows[0]["c"] == 0:
+        grant_starter_pack(conn, pid)
+    conn.close()
+    return pid
+
+def _wchoice(pairs):
+    total = sum(w for _, w in pairs)
+    r = random.random() * total
+    acc = 0.0
+    for v, w in pairs:
+        acc += w
+        if r <= acc:
+            return v
+    return pairs[-1][0]
+
+def random_genome():
+    genome = {}
+    for trait in TRAITS["traits"]:
+        t = trait["type"]
+        if t == "mendelian":
+            locus = trait["loci"][0]
+            dom, rec = trait["dominance"]
+            p_dom = trait["alleles"][dom]["p"]
+            p_rec = trait["alleles"][rec]["p"]
+            a1 = _wchoice([(dom, p_dom), (rec, p_rec)])
+            a2 = _wchoice([(dom, p_dom), (rec, p_rec)])
+            genome[locus] = [a1, a2]
+        elif t == "polygenic":
+            p_plus = trait["alleles"]["H+"]["p"]
+            p_min  = trait["alleles"]["h"]["p"]
+            for locus in trait["loci"]:
+                a1 = _wchoice([("H+", p_plus), ("h", p_min)])
+                a2 = _wchoice([("H+", p_plus), ("h", p_min)])
+                genome[locus] = [a1, a2]
+        elif t == "epistatic":
+            locus = trait["loci"][0]
+            p_on  = trait["alleles"]["V"]["p"]
+            p_off = trait["alleles"]["v"]["p"]
+            a1 = _wchoice([("V", p_on), ("v", p_off)])
+            a2 = _wchoice([("V", p_on), ("v", p_off)])
+            genome[locus] = [a1, a2]
+    return genome
+
+def grant_starter_pack(conn, user_id: str):
+    for sp in SPECIES:
+        genome = random_genome()
+        lot_id = uid("seed")
+        exec1(conn,
+              "INSERT INTO seeds(id,user_id,species,genome_json,qty,generation,parents_json) VALUES(?,?,?,?,?,?,?)",
+              (lot_id, user_id, sp, json.dumps(genome), 10, "F1", json.dumps({"mom": None, "dad": None})))
+
+def express_phenotype(genome: dict):
+    color = "white"
+    variegation = False
+    height_score = 0
+    for trait in TRAITS["traits"]:
+        ttype = trait["type"]
+        if ttype == "mendelian" and trait["id"] == "petal_color":
+            locus = trait["loci"][0]
+            dom, rec = trait["dominance"]
+            alleles = genome.get(locus, [rec, rec])
+            color = "colored" if dom in alleles else "white"
+        if ttype == "epistatic" and trait["id"] == "variegation":
+            locus = trait["loci"][0]
+            a_on = trait["alleles"]["V"]["code"]
+            alleles = genome.get(locus, [a_on, a_on])
+            variegation = (alleles[0] == "v" and alleles[1] == "v")
+        if ttype == "polygenic" and trait["id"] == "height":
+            total = 0
+            for locus in trait["loci"]:
+                a = genome.get(locus, ["h","h"])
+                total += (1 if a[0] == "H+" else 0) + (1 if a[1] == "H+" else 0)
+            height_score = total
+    appearance = "variegated " + color if variegation else color
+    return { "appearance": appearance, "height_score": height_score }
+
+def next_generation_label(gen: str | None) -> str:
+    try:
+        if not gen or not gen.upper().startswith("F"):
+            return "F1"
+        n = int(gen[1:])
+        return f"F{n+1}"
+    except:
+        return "F1"
+
+def compute_lot_qty(mom_health: float, dad_health: float, selfing: bool) -> int:
+    base = random.randint(4, 10)
+    vigor = (mom_health + dad_health) / 2.0
+    bonus = int(vigor * 4)
+    penalty = 1 if selfing else 0
+    return max(2, min(24, base + bonus - penalty))
+
+# ---------- Genetics UX helpers ----------
+
+def prob_dominant(mom: list[str], dad: list[str], dom: str, rec: str) -> float:
+    # P(child shows dominant phenotype) = 1 - P(cc)
+    mom_pass_rec = mom.count(rec) / 2.0
+    dad_pass_rec = dad.count(rec) / 2.0
+    p_cc = mom_pass_rec * dad_pass_rec
+    return 1.0 - p_cc
+
+def prob_vv(mom: list[str], dad: list[str]) -> float:
+    # P(vv) = P(m passes v) * P(d passes v)
+    pm = mom.count("v") / 2.0
+    pd = dad.count("v") / 2.0
+    return pm * pd
+
+def expected_height(mom_g: dict, dad_g: dict) -> float:
+    # For each height locus H1..H4, expected H+ count contributed = mean of parental allele counts / 2
+    loci = [t["loci"] for t in TRAITS["traits"] if t["id"] == "height"][0]
+    mean = 0.0
+    for locus in loci:
+        m = mom_g.get(locus, ["h","h"]).count("H+")
+        d = dad_g.get(locus, ["h","h"]).count("H+")
+        # child gets one allele from each parent
+        mean += (m/2.0 > 0) * (0.5 if m==1 else (1.0 if m==2 else 0.0))  # quick but meh
+        # simpler & clearer: expected H+ per locus = (m/2 + d/2) / 1  (one from each)
+        mean += (d/2.0)
+        mean -= ( (m/2.0 > 0) * 0.5 )  # fix the quick hack above
+    # okay… let’s just do exact expectation properly:
+    mean = 0.0
+    for locus in loci:
+        m_prob = (mom_g.get(locus, ["h","h"]).count("H+")) / 2.0  # chance mom passes H+
+        d_prob = (dad_g.get(locus, ["h","h"]).count("H+")) / 2.0  # chance dad passes H+
+        mean += m_prob + d_prob
+    return mean  # out of 8
+
+def preview_cross_stats(mom_g: dict, dad_g: dict) -> dict:
+    # color
+    dom, rec = "C", "c"
+    p_colored = prob_dominant(mom_g.get("C", ["c","c"]), dad_g.get("C", ["c","c"]), dom, rec)
+    # variegation
+    p_var = prob_vv(mom_g.get("VAR", ["V","V"]), dad_g.get("VAR", ["V","V"]))
+    # height expectation
+    h_mean = expected_height(mom_g, dad_g)
+    # stability: proportion of loci that are homozygous and identical in both parents
+    loci = set(mom_g.keys()) | set(dad_g.keys())
+    fixed = 0
+    for L in loci:
+        m = mom_g.get(L, [])
+        d = dad_g.get(L, [])
+        if len(m)==2 and len(d)==2 and m[0]==m[1]==d[0]==d[1]:
+            fixed += 1
+    stability = 0.0 if not loci else fixed / len(loci)
+    return {
+        "p_colored": p_colored,         # 0..1
+        "p_variegated": p_var,          # 0..1 (vv)
+        "h_mean": h_mean,               # 0..8
+        "stability": stability          # 0..1
+    }
+
+
+---
+
+app/routes/game.py (ticks → stages + fruit growth; breeding creates fruit; preview route; harvest route)
+
+import json
+from fastapi import APIRouter, Request, Form
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
+from app.db import get_conn, q, exec1
+from app.utils import (
+    uid, express_phenotype, next_generation_label, grant_starter_pack,
+    compute_lot_qty, preview_cross_stats
+)
+from app.genetics.engine import simple_tick, recombine_genomes, GROWTH, compute_stage
+
+templates = Jinja2Templates(directory="app/templates")
+router = APIRouter()
+
+@router.get("/greenhouse", response_class=HTMLResponse)
+async def greenhouse(request: Request):
+    player_id = request.state.player_id
+    conn = get_conn()
+    plants = q(conn, "SELECT * FROM plants WHERE user_id=? ORDER BY created_at DESC", (player_id,))
+    seeds = q(conn, "SELECT * FROM seeds WHERE user_id=? ORDER BY species", (player_id,))
+    fruits = q(conn, "SELECT * FROM fruits WHERE user_id=? ORDER BY created_at DESC", (player_id,))
+
+    plant_cards = []
+    for row in plants:
+        genome = json.loads(row["genome_json"])
+        pheno = express_phenotype(genome)
+        plant_cards.append({
+            "id": row["id"],
+            "species": row["species"],
+            "age_days": row["age_days"],
+            "health": round(row["health"], 3),
+            "generation": row["generation"],
+            "stage": row["stage"],
+            "appearance": pheno["appearance"],
+            "height_score": pheno["height_score"]
+        })
+    conn.close()
+    return templates.TemplateResponse("greenhouse.html", {
+        "request": request,
+        "plants": plant_cards,
+        "seeds": seeds,
+        "fruits": fruits
+    })
+
+@router.post("/plant_seed")
+async def plant_seed(request: Request, seed_id: str = Form(...)):
+    player_id = request.state.player_id
+    conn = get_conn()
+    rows = q(conn, "SELECT * FROM seeds WHERE id=? AND user_id=?", (seed_id, player_id))
+    if not rows:
+        conn.close()
+        return RedirectResponse(url="/greenhouse", status_code=303)
+    lot = rows[0]
+    if lot["qty"] <= 0:
+        conn.close()
+        return RedirectResponse(url="/greenhouse", status_code=303)
+
+    exec1(conn, "UPDATE seeds SET qty=? WHERE id=?", (lot["qty"] - 1, seed_id))
+    pid = uid("plant")
+    exec1(conn,
+          "INSERT INTO plants(id,user_id,species,genome_json,age_days,health,generation,stage) VALUES(?,?,?,?,?,?,?,?)",
+          (pid, player_id, lot["species"], lot["genome_json"], 0, 1.0, lot["generation"], "seedling"))
+    conn.close()
+    return RedirectResponse(url="/greenhouse", status_code=303)
+
+@router.post("/tick")
+async def tick(request: Request):
+    player_id = request.state.player_id
+    conn = get_conn()
+    # plants
+    plants = q(conn, "SELECT id, age_days, health FROM plants WHERE user_id=?", (player_id,))
+    for p in plants:
+        new_age, new_health, new_stage = simple_tick(p["age_days"], p["health"])
+        exec1(conn,
+              "UPDATE plants SET age_days=?, health=?, stage=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+              (new_age, new_health, new_stage, p["id"]))
+    # fruits
+    fruits = q(conn, "SELECT * FROM fruits WHERE user_id=? AND status='growing'", (player_id,))
+    for f in fruits:
+        remain = int(f["days_remaining"]) - 1
+        status = "ripe" if remain <= 0 else "growing"
+        exec1(conn, "UPDATE fruits SET days_remaining=?, status=? WHERE id=?",
+              (max(0, remain), status, f["id"]))
+    conn.close()
+    return RedirectResponse(url="/greenhouse", status_code=303)
+
+@router.post("/new_game")
+async def new_game(request: Request):
+    player_id = request.state.player_id
+    conn = get_conn()
+    exec1(conn, "DELETE FROM plants WHERE user_id=?", (player_id,))
+    exec1(conn, "DELETE FROM seeds WHERE user_id=?", (player_id,))
+    exec1(conn, "DELETE FROM fruits WHERE user_id=?", (player_id,))
+    grant_starter_pack(conn, player_id)
+    conn.close()
+    return RedirectResponse(url="/greenhouse", status_code=303)
+
+# ---------- Breeding flow: flowering only → FRUIT (delayed seeds) ----------
+
+@router.get("/breeding", response_class=HTMLResponse)
+async def breeding_room(request: Request):
+    player_id = request.state.player_id
+    conn = get_conn()
+    plants = q(conn, "SELECT * FROM plants WHERE user_id=? ORDER BY created_at DESC", (player_id,))
+    # cards
+    cards = []
+    for row in plants:
+        genome = json.loads(row["genome_json"])
+        pheno = express_phenotype(genome)
+        cards.append({
+            "id": row["id"],
+            "species": row["species"],
+            "generation": row["generation"],
+            "age_days": row["age_days"],
+            "stage": row["stage"],
+            "appearance": pheno["appearance"],
+            "height_score": pheno["height_score"]
+        })
+    fruits = q(conn, "SELECT * FROM fruits WHERE user_id=? ORDER BY created_at DESC LIMIT 20", (player_id,))
+    conn.close()
+    err = request.query_params.get("err")
+    return templates.TemplateResponse("breeding.html", {
+        "request": request,
+        "plants": cards,
+        "fruits": fruits,
+        "err": err
+    })
+
+@router.post("/preview_cross", response_class=HTMLResponse)
+async def preview_cross(request: Request,
+                        mom_id: str = Form(...),
+                        dad_id: str = Form(...)):
+    player_id = request.state.player_id
+    conn = get_conn()
+    mom = q(conn, "SELECT * FROM plants WHERE id=? AND user_id=?", (mom_id, player_id))
+    dad = q(conn, "SELECT * FROM plants WHERE id=? AND user_id=?", (dad_id, player_id))
+    conn.close()
+    if not mom or not dad:
+        return HTMLResponse("<div class='muted'>Select two plants.</div>")
+    mom, dad = mom[0], dad[0]
+    mom_g = json.loads(mom["genome_json"])
+    dad_g = json.loads(dad["genome_json"])
+    stats = preview_cross_stats(mom_g, dad_g)
+    # tiny fragment
+    return HTMLResponse(f"""
+<div class="card" style="margin-top:8px;">
+  <strong>Preview</strong>
+  <div class="muted">Requires both parents at <em>flowering</em>.</div>
+  <ul>
+    <li>Colored petals: <strong>{round(stats['p_colored']*100)}%</strong></li>
+    <li>Variegation (vv): <strong>{round(stats['p_variegated']*100)}%</strong></li>
+    <li>Expected height score: <strong>{stats['h_mean']:.1f}</strong> / 8</li>
+    <li>Stability (fixed loci): <strong>{round(stats['stability']*100)}%</strong></li>
+  </ul>
+</div>
+""")
+
+@router.post("/pollinate")
+async def pollinate(request: Request,
+                    mom_id: str = Form(...),
+                    dad_id: str = Form(...)):
+    player_id = request.state.player_id
+    conn = get_conn()
+    moms = q(conn, "SELECT * FROM plants WHERE id=? AND user_id=?", (mom_id, player_id))
+    dads = q(conn, "SELECT * FROM plants WHERE id=? AND user_id=?", (dad_id, player_id))
+    if not moms or not dads:
+        conn.close()
+        return RedirectResponse(url="/breeding?err=notfound", status_code=303)
+
+    mom = moms[0]; dad = dads[0]
+    if mom["species"] != dad["species"]:
+        conn.close()
+        return RedirectResponse(url="/breeding?err=species", status_code=303)
+    if mom["stage"] != "flowering" or dad["stage"] != "flowering":
+        conn.close()
+        return RedirectResponse(url="/breeding?err=stage", status_code=303)
+
+    mom_g = json.loads(mom["genome_json"])
+    dad_g = json.loads(dad["genome_json"])
+    child_g = recombine_genomes(mom_g, dad_g)
+
+    try:
+        g_m = int(str(mom["generation"])[1:]) if mom["generation"] else 1
+        g_d = int(str(dad["generation"])[1:]) if dad["generation"] else 1
+        base = f"F{max(g_m, g_d)}"
+    except:
+        base = "F1"
+    child_gen = next_generation_label(base)
+
+    qty = compute_lot_qty(float(mom["health"]), float(dad["health"]), mom["id"] == dad["id"])
+    fruit_id = uid("fruit")
+    exec1(conn,
+          "INSERT INTO fruits(id,user_id,species,mom_id,dad_id,genome_json,qty,generation,days_remaining,status) VALUES(?,?,?,?,?,?,?,?,?,?)",
+          (fruit_id, player_id, mom["species"], mom["id"], dad["id"], json.dumps(child_g), qty, child_gen, GROWTH["fruit_days"], "growing"))
+    conn.close()
+    return RedirectResponse(url="/breeding", status_code=303)
+
+@router.post("/harvest_fruit")
+async def harvest_fruit(request: Request, fruit_id: str = Form(...)):
+    player_id = request.state.player_id
+    conn = get_conn()
+    rows = q(conn, "SELECT * FROM fruits WHERE id=? AND user_id=?", (fruit_id, player_id))
+    if not rows:
+        conn.close()
+        return RedirectResponse(url="/greenhouse", status_code=303)
+    f = rows[0]
+    if f["status"] != "ripe":
+        conn.close()
+        return RedirectResponse(url="/greenhouse", status_code=303)
+    seed_id = uid("seed")
+    parents = {"mom": f["mom_id"], "dad": f["dad_id"]}
+    exec1(conn,
+          "INSERT INTO seeds(id,user_id,species,genome_json,qty,generation,parents_json) VALUES(?,?,?,?,?,?,?)",
+          (seed_id, player_id, f["species"], f["genome_json"], f["qty"], f["generation"], json.dumps(parents)))
+    exec1(conn, "UPDATE fruits SET status='harvested' WHERE id=?", (fruit_id,))
+    conn.close()
+    return RedirectResponse(url="/greenhouse", status_code=303)
+
+
+---
+
+app/templates/base.html (unchanged except what you already added for the modal)
+
+No changes required here beyond your existing modal button setup.
+
+
+---
+
+app/templates/greenhouse.html (show plant stage + Fruits section + Harvest)
+
+{% extends "base.html" %}
+{% block content %}
+<div class="grid">
+  <section class="card">
+    <h2>Starter & Stored Seeds</h2>
+    {% if seeds|length == 0 %}
+      <p>No seeds. Start a <em>New Game</em> to get a starter pack.</p>
+    {% else %}
+      <table class="table">
+        <thead><tr><th>Species</th><th>Lot ID</th><th>Qty</th><th>Gen</th><th>Action</th></tr></thead>
+        <tbody>
+        {% for s in seeds %}
+          <tr>
+            <td>{{ s['species'] }}</td>
+            <td class="mono">{{ s['id'] }}</td>
+            <td>{{ s['qty'] }}</td>
+            <td>{{ s['generation'] }}</td>
+            <td>
+              {% if s['qty'] > 0 %}
+              <form action="/plant_seed" method="post">
+                <input type="hidden" name="seed_id" value="{{ s['id'] }}"/>
+                <button class="btn" type="submit">Plant 1</button>
+              </form>
+              {% else %}<span class="muted">Empty</span>{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Greenhouse</h2>
+    {% if plants|length == 0 %}
+      <p>No plants yet. Plant a seed from your seeds list.</p>
+    {% else %}
+      <div class="cards">
+        {% for p in plants %}
+        <div class="plant">
+          <div class="plant-head">
+            <strong>{{ p.species }} · {{ p.generation }}</strong>
+            <span class="muted">Age {{ p.age_days }}d · {{ p.stage }} · Health {{ p.health }}</span>
+          </div>
+          <div class="plant-body">
+            <div>Appearance: <strong>{{ p.appearance }}</strong></div>
+            <div>Height score: <strong>{{ p.height_score }}</strong></div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="card" style="grid-column: 1 / -1;">
+    <h2>Fruits & Pods</h2>
+    {% if fruits|length == 0 %}
+      <p class="muted">No fruits yet. Breed flowering plants to set fruit.</p>
+    {% else %}
+      <table class="table">
+        <thead><tr><th>Species</th><th>Fruit ID</th><th>Gen</th><th>Qty</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody>
+        {% for f in fruits %}
+          <tr>
+            <td>{{ f['species'] }}</td>
+            <td class="mono">{{ f['id'] }}</td>
+            <td>{{ f['generation'] }}</td>
+            <td>{{ f['qty'] }}</td>
+            <td>
+              {% if f['status'] == 'growing' %}Growing ({{ f['days_remaining'] }}d)
+              {% elif f['status'] == 'ripe' %}Ripe
+              {% else %}Harvested{% endif %}
+            </td>
+            <td>
+              {% if f['status'] == 'ripe' %}
+                <form action="/harvest_fruit" method="post">
+                  <input type="hidden" name="fruit_id" value="{{ f['id'] }}"/>
+                  <button class="btn" type="submit">Harvest → Seeds</button>
+                </form>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+
+---
+
+app/templates/breeding.html (stages + preview + fruits list)
+
+{% extends "base.html" %}
+{% block content %}
+{% if err %}
+  <div class="card" style="border-color:#ea6b6b">
+    {% if err == 'stage' %}Both parents must be at <strong>flowering</strong>.{% endif %}
+    {% if err == 'species' %}Parents must be the same species.{% endif %}
+    {% if err == 'notfound' %}One or both parents weren’t found.{% endif %}
+  </div>
+{% endif %}
+
+<div class="grid">
+  <section class="card">
+    <h2>Breeding Room</h2>
+    {% if plants|length < 1 %}
+      <p>Plant something first 🙂</p>
+    {% else %}
+      <form action="/pollinate" method="post" class="breed-form" id="breedForm">
+        <div class="row">
+          <label>Mom Plant</label>
+          <select name="mom_id" required id="momSel"
+                  hx-post="/preview_cross"
+                  hx-target="#preview"
+                  hx-include="#momSel,#dadSel"
+                  hx-trigger="change">
+            {% for p in plants %}
+              <option value="{{ p.id }}">{{ p.species }} · {{ p.generation }} · {{ p.appearance }} · H{{ p.height_score }} · {{ p.stage }} ({{ p.id }})</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="row">
+          <label>Dad Plant</label>
+          <select name="dad_id" required id="dadSel"
+                  hx-post="/preview_cross"
+                  hx-target="#preview"
+                  hx-include="#momSel,#dadSel"
+                  hx-trigger="change">
+            {% for p in plants %}
+              <option value="{{ p.id }}">{{ p.species }} · {{ p.generation }} · {{ p.appearance }} · H{{ p.height_score }} · {{ p.stage }} ({{ p.id }})</option>
+            {% endfor %}
+          </select>
+          <small class="muted">Parents must be <strong>flowering</strong>. Selfing allowed.</small>
+        </div>
+        <div id="preview" class="muted">Change a parent to preview genetics.</div>
+        <button class="btn" type="submit">Pollinate (creates fruit)</button>
+      </form>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Recent Fruits</h2>
+    {% if fruits|length == 0 %}
+      <p>No fruits yet. Pollinate flowering plants above.</p>
+    {% else %}
+      <table class="table">
+        <thead><tr><th>Species</th><th>Fruit</th><th>Qty</th><th>Gen</th><th>Status</th></tr></thead>
+        <tbody>
+          {% for f in fruits %}
+            <tr>
+              <td>{{ f['species'] }}</td>
+              <td class="mono">{{ f['id'] }}</td>
+              <td>{{ f['qty'] }}</td>
+              <td>{{ f['generation'] }}</td>
+              <td>
+                {% if f['status'] == 'growing' %}Growing ({{ f['days_remaining'] }}d)
+                {% elif f['status'] == 'ripe' %}Ripe — harvest in Greenhouse
+                {% else %}Harvested{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+
+---
+
+app/static/styles.css (add tiny styles if you want the preview to breathe)
+
+Append (optional):
+
+.breed-form .row { margin-bottom: 8px; }
+#preview { margin: 8px 0 12px 0; }
+
+
+---
+
+app/genetics/traits.json (same as last version with weights)
+
+No change needed unless you want different frequencies.
+
+
+---
+
+Flow now
+
+1. Tick plants to advance stages.
+
+
+2. Only when a plant shows flowering will the Pollinate submit succeed.
+
+
+3. Pollination → fruit with days_remaining.
+
+
+4. Keep ticking → fruit reaches ripe.
+
+
+5. Go to Greenhouse → Fruits & Pods → Harvest → Seeds (POST).
+
+
+6. Seeds show in inventory; plant them like before.
+
+
+
+If you want different stage timings per species, I’ll add a species map (GROWTH_BY_SPECIES) next. After this, we can layer in stability % on seed lots, NPC market v0, or a per-trait Punnett widget. Your move.
+

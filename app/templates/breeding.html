@@ -1,64 +1,74 @@
 {% extends "base.html" %}
 {% block content %}
+{% if err %}
+  <div class="card" style="border-color:#ea6b6b">
+    {% if err == 'stage' %}Both parents must be at <strong>flowering</strong>.{% endif %}
+    {% if err == 'species' %}Parents must be the same species.{% endif %}
+    {% if err == 'notfound' %}One or both parents weren't found.{% endif %}
+  </div>
+{% endif %}
+
 <div class="grid">
   <section class="card">
     <h2>Breeding Room</h2>
-    {% if plants|length < 2 %}
-      <p>You need at least two plants of the <em>same species</em> to breed.</p>
+    {% if plants|length < 1 %}
+      <p>Plant something first 🙂</p>
     {% else %}
-      <form action="/pollinate" method="post" class="breed-form">
+      <form action="/pollinate" method="post" class="breed-form" id="breedForm">
         <div class="row">
           <label>Mom Plant</label>
-          <select name="mom_id" required>
+          <select name="mom_id" required id="momSel"
+                  hx-post="/preview_cross"
+                  hx-target="#preview"
+                  hx-include="#momSel,#dadSel"
+                  hx-trigger="change">
             {% for p in plants %}
-              <option value="{{ p.id }}">{{ p.species }} · {{ p.generation }} · {{ p.appearance }} · H{{ p.height_score }} ({{ p.id }})</option>
+              <option value="{{ p.id }}">{{ p.species }} · {{ p.generation }} · {{ p.appearance }} · H{{ p.height_score }} · {{ p.stage }} ({{ p.id }})</option>
             {% endfor %}
           </select>
         </div>
         <div class="row">
           <label>Dad Plant</label>
-          <select name="dad_id" required>
+          <select name="dad_id" required id="dadSel"
+                  hx-post="/preview_cross"
+                  hx-target="#preview"
+                  hx-include="#momSel,#dadSel"
+                  hx-trigger="change">
             {% for p in plants %}
-              <option value="{{ p.id }}">{{ p.species }} · {{ p.generation }} · {{ p.appearance }} · H{{ p.height_score }} ({{ p.id }})</option>
+              <option value="{{ p.id }}">{{ p.species }} · {{ p.generation }} · {{ p.appearance }} · H{{ p.height_score }} · {{ p.stage }} ({{ p.id }})</option>
             {% endfor %}
           </select>
+          <small class="muted">Parents must be <strong>flowering</strong>. Selfing allowed.</small>
         </div>
-        <div class="row">
-          <label>Lot Size</label>
-          <input type="number" name="lot_size" min="2" max="24" value="8"/>
-        </div>
-        <button class="btn" type="submit">Create Seed Lot</button>
+        <div id="preview" class="muted">Change a parent to preview genetics.</div>
+        <button class="btn" type="submit">Pollinate (creates fruit)</button>
       </form>
     {% endif %}
   </section>
 
   <section class="card">
-    <h2>Recent Seed Lots</h2>
-    {% if lots|length == 0 %}
-      <p>No seed lots yet. Make your first cross!</p>
+    <h2>Recent Fruits</h2>
+    {% if fruits|length == 0 %}
+      <p>No fruits yet. Pollinate flowering plants above.</p>
     {% else %}
       <table class="table">
-        <thead><tr><th>Species</th><th>Lot</th><th>Qty</th><th>Gen</th><th>Parents</th></tr></thead>
+        <thead><tr><th>Species</th><th>Fruit</th><th>Qty</th><th>Gen</th><th>Status</th></tr></thead>
         <tbody>
-          {% for s in lots %}
+          {% for f in fruits %}
             <tr>
-              <td>{{ s['species'] }}</td>
-              <td class="mono">{{ s['id'] }}</td>
-              <td>{{ s['qty'] }}</td>
-              <td>{{ s['generation'] }}</td>
-              <td class="mono">
-                {% if s['parents_json'] %}
-                  {% set pj = s['parents_json'] | tojson %}
-                  {{ s['parents_json'] }}
-                {% else %}
-                  —
-                {% endif %}
+              <td>{{ f['species'] }}</td>
+              <td class="mono">{{ f['id'] }}</td>
+              <td>{{ f['qty'] }}</td>
+              <td>{{ f['generation'] }}</td>
+              <td>
+                {% if f['status'] == 'growing' %}Growing ({{ f['days_remaining'] }}d)
+                {% elif f['status'] == 'ripe' %}Ripe — harvest in Greenhouse
+                {% else %}Harvested{% endif %}
               </td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
-      <p class="muted">Plant from <em>Greenhouse → Seeds</em> when ready.</p>
     {% endif %}
   </section>
 </div>

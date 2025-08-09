@@ -106,3 +106,59 @@ def next_generation_label(gen: str | None) -> str:
         return f"F{n+1}"
     except:
         return "F1"
+
+def compute_lot_qty(mom_health: float, dad_health: float, selfing: bool) -> int:
+    base = random.randint(4, 10)
+    vigor = (mom_health + dad_health) / 2.0
+    bonus = int(vigor * 4)
+    penalty = 1 if selfing else 0
+    return max(2, min(24, base + bonus - penalty))
+
+# ---------- Genetics UX helpers ----------
+
+def prob_dominant(mom: list[str], dad: list[str], dom: str, rec: str) -> float:
+    # P(child shows dominant phenotype) = 1 - P(cc)
+    mom_pass_rec = mom.count(rec) / 2.0
+    dad_pass_rec = dad.count(rec) / 2.0
+    p_cc = mom_pass_rec * dad_pass_rec
+    return 1.0 - p_cc
+
+def prob_vv(mom: list[str], dad: list[str]) -> float:
+    # P(vv) = P(m passes v) * P(d passes v)
+    pm = mom.count("v") / 2.0
+    pd = dad.count("v") / 2.0
+    return pm * pd
+
+def expected_height(mom_g: dict, dad_g: dict) -> float:
+    # For each height locus H1..H4, expected H+ count contributed = mean of parental allele counts / 2
+    loci = [t["loci"] for t in TRAITS["traits"] if t["id"] == "height"][0]
+    mean = 0.0
+    for locus in loci:
+        m_prob = (mom_g.get(locus, ["h","h"]).count("H+")) / 2.0  # chance mom passes H+
+        d_prob = (dad_g.get(locus, ["h","h"]).count("H+")) / 2.0  # chance dad passes H+
+        mean += m_prob + d_prob
+    return mean  # out of 8
+
+def preview_cross_stats(mom_g: dict, dad_g: dict) -> dict:
+    # color
+    dom, rec = "C", "c"
+    p_colored = prob_dominant(mom_g.get("C", ["c","c"]), dad_g.get("C", ["c","c"]), dom, rec)
+    # variegation
+    p_var = prob_vv(mom_g.get("VAR", ["V","V"]), dad_g.get("VAR", ["V","V"]))
+    # height expectation
+    h_mean = expected_height(mom_g, dad_g)
+    # stability: proportion of loci that are homozygous and identical in both parents
+    loci = set(mom_g.keys()) | set(dad_g.keys())
+    fixed = 0
+    for L in loci:
+        m = mom_g.get(L, [])
+        d = dad_g.get(L, [])
+        if len(m)==2 and len(d)==2 and m[0]==m[1]==d[0]==d[1]:
+            fixed += 1
+    stability = 0.0 if not loci else fixed / len(loci)
+    return {
+        "p_colored": p_colored,         # 0..1
+        "p_variegated": p_var,          # 0..1 (vv)
+        "h_mean": h_mean,               # 0..8
+        "stability": stability          # 0..1
+    }

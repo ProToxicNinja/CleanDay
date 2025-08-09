@@ -40,7 +40,7 @@
         <div class="plant">
           <div class="plant-head">
             <strong>{{ p.species }} · {{ p.generation }}</strong>
-            <span class="muted">Age {{ p.age_days }}d · Health {{ p.health }}</span>
+            <span class="muted">Age {{ p.age_days }}d · {{ p.stage }} · Health {{ p.health }}</span>
           </div>
           <div class="plant-body">
             <div>Appearance: <strong>{{ p.appearance }}</strong></div>
@@ -49,6 +49,42 @@
         </div>
         {% endfor %}
       </div>
+    {% endif %}
+  </section>
+
+  <section class="card" style="grid-column: 1 / -1;">
+    <h2>Fruits & Pods</h2>
+    {% if fruits|length == 0 %}
+      <p class="muted">No fruits yet. Breed flowering plants to set fruit.</p>
+    {% else %}
+      <table class="table">
+        <thead><tr><th>Species</th><th>Fruit ID</th><th>Gen</th><th>Qty</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody>
+        {% for f in fruits %}
+          <tr>
+            <td>{{ f['species'] }}</td>
+            <td class="mono">{{ f['id'] }}</td>
+            <td>{{ f['generation'] }}</td>
+            <td>{{ f['qty'] }}</td>
+            <td>
+              {% if f['status'] == 'growing' %}Growing ({{ f['days_remaining'] }}d)
+              {% elif f['status'] == 'ripe' %}Ripe
+              {% else %}Harvested{% endif %}
+            </td>
+            <td>
+              {% if f['status'] == 'ripe' %}
+                <form action="/harvest_fruit" method="post">
+                  <input type="hidden" name="fruit_id" value="{{ f['id'] }}"/>
+                  <button class="btn" type="submit">Harvest → Seeds</button>
+                </form>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
     {% endif %}
   </section>
 </div>
