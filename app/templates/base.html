@@ -1,52 +1,29 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Plant Breeder Sim{% endblock %}</title>
-    <!-- Bootstrap CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- HTMX -->
-    <script src="https://unpkg.com/htmx.org@1.9.6"></script>
-    <!-- Feather Icons -->
-    <script src="https://unpkg.com/feather-icons"></script>
-    <!-- Custom styles -->
-    <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+  <meta charset="utf-8">
+  <title>Plant Breeder Sim — Day 1</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="stylesheet" href="/static/styles.css">
+  <!-- HTMX (CDN) -->
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
 </head>
 <body>
-    <!-- Navigation -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-success">
-        <div class="container">
-            <a class="navbar-brand d-flex align-items-center" href="/greenhouse">
-                <i data-feather="sun" class="me-2"></i>
-                Plant Breeder Sim
-            </a>
-            <div class="navbar-nav ms-auto">
-                <a class="nav-link" href="/greenhouse">
-                    <i data-feather="home" class="me-1"></i>
-                    Greenhouse
-                </a>
-            </div>
-        </div>
+  <header class="topbar">
+    <h1>🌱 Plant Breeder Sim</h1>
+    <nav>
+      <a href="/greenhouse">Greenhouse</a>
+      <form action="/tick" method="post" style="display:inline;">
+        <button class="btn small" type="submit">Tick +1 Day</button>
+      </form>
+      <form action="/new_game" method="post" style="display:inline;">
+        <button class="btn small danger" type="submit">New Game</button>
+      </form>
     </nav>
-
-    <!-- Main content -->
-    <main class="container mt-4">
-        {% block content %}{% endblock %}
-    </main>
-
-    <!-- Footer -->
-    <footer class="bg-light mt-5 py-4">
-        <div class="container text-center text-muted">
-            <small>Plant Breeder Sim - Day 1 | Genetics & Breeding Simulation</small>
-        </div>
-    </footer>
-
-    <!-- Bootstrap JS -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <!-- Initialize Feather Icons -->
-    <script>
-        feather.replace();
-    </script>
+  </header>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="footer">Day 1 prototype — no market yet.</footer>
 </body>
 </html>

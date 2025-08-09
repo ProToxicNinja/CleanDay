@@ -69,3 +69,14 @@ async def tick(request: Request):
               (new_age, new_health, p["id"]))
     conn.close()
     return RedirectResponse(url="/greenhouse", status_code=303)
+
+@router.post("/new_game")
+async def new_game(request: Request):
+    from app.utils import get_or_create_player
+    player_id = request.state.player_id
+    conn = get_conn()
+    exec1(conn, "DELETE FROM plants WHERE user_id=?", (player_id,))
+    exec1(conn, "DELETE FROM seeds WHERE user_id=?", (player_id,))
+    _ = get_or_create_player()
+    conn.close()
+    return RedirectResponse(url="/greenhouse", status_code=303)

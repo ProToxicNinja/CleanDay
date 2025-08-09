@@ -1,180 +1,57 @@
 {% extends "base.html" %}
-
-{% block title %}Greenhouse - Plant Breeder Sim{% endblock %}
-
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h1 class="h2">
-        <i data-feather="home" class="me-2 text-success"></i>
-        Your Greenhouse
-    </h1>
-    <form method="post" action="/tick" class="d-inline">
-        <button type="submit" class="btn btn-warning">
-            <i data-feather="clock" class="me-1"></i>
-            Advance Time (Tick)
-        </button>
-    </form>
-</div>
+<div class="grid">
+  <section class="card">
+    <h2>Starter Seeds</h2>
+    {% if seeds|length == 0 %}
+      <p>No seeds. Start a <em>New Game</em> to get a starter pack.</p>
+    {% else %}
+      <table class="table">
+        <thead><tr><th>Species</th><th>Lot ID</th><th>Qty</th><th>Gen</th><th>Action</th></tr></thead>
+        <tbody>
+        {% for s in seeds %}
+          <tr>
+            <td>{{ s['species'] }}</td>
+            <td class="mono">{{ s['id'] }}</td>
+            <td>{{ s['qty'] }}</td>
+            <td>{{ s['generation'] }}</td>
+            <td>
+              {% if s['qty'] > 0 %}
+              <form action="/plant_seed" method="post">
+                <input type="hidden" name="seed_id" value="{{ s['id'] }}"/>
+                <button class="btn" type="submit">Plant 1</button>
+              </form>
+              {% else %}
+                <span class="muted">Empty</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </section>
 
-<!-- Seed Inventory -->
-<div class="row mb-5">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header bg-primary text-white">
-                <h4 class="mb-0">
-                    <i data-feather="package" class="me-2"></i>
-                    Seed Inventory
-                </h4>
-            </div>
-            <div class="card-body">
-                {% if seeds %}
-                    <div class="row">
-                        {% for seed in seeds %}
-                        <div class="col-md-4 mb-3">
-                            <div class="card h-100 border-primary">
-                                <div class="card-body">
-                                    <h5 class="card-title text-primary">{{ seed.species }}</h5>
-                                    <p class="card-text">
-                                        <strong>Quantity:</strong> {{ seed.qty }}<br>
-                                        <strong>Generation:</strong> {{ seed.generation }}
-                                    </p>
-                                    {% if seed.qty > 0 %}
-                                    <form method="post" action="/plant_seed" class="d-inline">
-                                        <input type="hidden" name="seed_id" value="{{ seed.id }}">
-                                        <button type="submit" class="btn btn-success btn-sm">
-                                            <i data-feather="plus" class="me-1"></i>
-                                            Plant Seed
-                                        </button>
-                                    </form>
-                                    {% else %}
-                                    <button class="btn btn-secondary btn-sm" disabled>
-                                        Out of Stock
-                                    </button>
-                                    {% endif %}
-                                </div>
-                            </div>
-                        </div>
-                        {% endfor %}
-                    </div>
-                {% else %}
-                    <div class="text-center text-muted">
-                        <i data-feather="inbox" style="width: 3rem; height: 3rem;"></i>
-                        <p class="mt-2">No seeds available. This shouldn't happen - you should have starter seeds!</p>
-                    </div>
-                {% endif %}
-            </div>
+  <section class="card">
+    <h2>Greenhouse</h2>
+    {% if plants|length == 0 %}
+      <p>No plants yet. Plant a seed from your starter pack.</p>
+    {% else %}
+      <div class="cards">
+        {% for p in plants %}
+        <div class="plant">
+          <div class="plant-head">
+            <strong>{{ p.species }}</strong>
+            <span class="muted">Age {{ p.age_days }}d · Health {{ p.health }}</span>
+          </div>
+          <div class="plant-body">
+            <div>Appearance: <strong>{{ p.appearance }}</strong></div>
+            <div>Height score: <strong>{{ p.height_score }}</strong></div>
+          </div>
         </div>
-    </div>
-</div>
-
-<!-- Plant Collection -->
-<div class="row">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header bg-success text-white">
-                <h4 class="mb-0">
-                    <i data-feather="grid" class="me-2"></i>
-                    Growing Plants
-                </h4>
-            </div>
-            <div class="card-body">
-                {% if plants %}
-                    <div class="row">
-                        {% for plant in plants %}
-                        <div class="col-md-6 col-lg-4 mb-4">
-                            <div class="card h-100 plant-card">
-                                <div class="card-body">
-                                    <div class="d-flex justify-content-between align-items-start mb-2">
-                                        <h5 class="card-title text-success">{{ plant.species }}</h5>
-                                        <span class="badge bg-info">Day {{ plant.age_days }}</span>
-                                    </div>
-                                    
-                                    <div class="plant-stats mb-3">
-                                        <div class="row text-center">
-                                            <div class="col-6">
-                                                <div class="stat-item">
-                                                    <i data-feather="heart" class="text-danger"></i>
-                                                    <div class="stat-value">{{ plant.health }}</div>
-                                                    <div class="stat-label">Health</div>
-                                                </div>
-                                            </div>
-                                            <div class="col-6">
-                                                <div class="stat-item">
-                                                    <i data-feather="trending-up" class="text-primary"></i>
-                                                    <div class="stat-value">{{ plant.height_score }}</div>
-                                                    <div class="stat-label">Height</div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div class="appearance-section">
-                                        <h6 class="text-muted mb-2">Appearance</h6>
-                                        <div class="appearance-display p-2 rounded text-center">
-                                            {% if "variegated" in plant.appearance %}
-                                                <span class="badge bg-gradient" style="background: linear-gradient(45deg, #fff, #007bff);">
-                                                    {{ plant.appearance.title() }}
-                                                </span>
-                                            {% elif "colored" in plant.appearance %}
-                                                <span class="badge bg-primary">
-                                                    {{ plant.appearance.title() }}
-                                                </span>
-                                            {% else %}
-                                                <span class="badge bg-light text-dark">
-                                                    {{ plant.appearance.title() }}
-                                                </span>
-                                            {% endif %}
-                                        </div>
-                                    </div>
-
-                                    <!-- Health indicator -->
-                                    <div class="progress mt-3" style="height: 6px;">
-                                        {% set health_percent = (plant.health * 100)|round|int %}
-                                        {% if health_percent >= 70 %}
-                                            {% set health_color = "success" %}
-                                        {% elif health_percent >= 40 %}
-                                            {% set health_color = "warning" %}
-                                        {% else %}
-                                            {% set health_color = "danger" %}
-                                        {% endif %}
-                                        <div class="progress-bar bg-{{ health_color }}" role="progressbar" 
-                                             style="width: {{ health_percent }}%" 
-                                             aria-valuenow="{{ health_percent }}" 
-                                             aria-valuemin="0" aria-valuemax="100">
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        {% endfor %}
-                    </div>
-                {% else %}
-                    <div class="text-center text-muted py-5">
-                        <i data-feather="plus-circle" style="width: 4rem; height: 4rem;"></i>
-                        <h5 class="mt-3">No plants growing yet</h5>
-                        <p>Plant some seeds from your inventory above to get started!</p>
-                    </div>
-                {% endif %}
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Instructions -->
-<div class="row mt-4">
-    <div class="col-12">
-        <div class="alert alert-info">
-            <h6 class="alert-heading">
-                <i data-feather="info" class="me-1"></i>
-                How to Play
-            </h6>
-            <ul class="mb-0">
-                <li><strong>Plant Seeds:</strong> Use your seed inventory to grow new plants</li>
-                <li><strong>Advance Time:</strong> Click "Advance Time (Tick)" to age your plants by one day</li>
-                <li><strong>Observe Traits:</strong> Watch how genetics affect appearance and height</li>
-                <li><strong>Plan Breeding:</strong> Future updates will allow cross-breeding for new combinations!</li>
-            </ul>
-        </div>
-    </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </section>
 </div>
 {% endblock %}
