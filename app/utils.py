@@ -65,6 +65,107 @@ def uid(prefix: str | None = None) -> str:
 
 
 # ------------------------------
+# Generation helpers
+# ------------------------------
+def next_generation_label(gen: int) -> str:
+    """Return a short label for a generation number, e.g. G01, G12."""
+    return f"G{int(gen):02d}"
+
+
+def grant_starter_pack(conn: sqlite3.Connection, user_id: str) -> None:
+    """Give a new player a small starter seed lot if they have none."""
+    has_seeds = q(conn, "SELECT 1 FROM seeds WHERE user_id=? LIMIT 1", (user_id,))
+    if has_seeds:
+        return
+    conn.execute(
+        "INSERT INTO seeds(id,user_id,species,genome_json,qty,generation,parents_json) VALUES(?,?,?,?,?,?,?)",
+        (
+            uid("seed"),
+            user_id,
+            "starter",
+            json.dumps({}),
+            5,
+            next_generation_label(1),
+            json.dumps({"mom": None, "dad": None}),
+        ),
+    )
+    conn.commit()
+
+
+def compute_lot_qty(mom_health: float, dad_health: float, selfing: bool) -> int:
+    """Compute seed lot size based on parent health and whether selfing."""
+    base = random.randint(4, 10)
+    vigor = (mom_health + dad_health) / 2.0
+    bonus = int(vigor * 4)
+    penalty = 1 if selfing else 0
+    return max(2, min(24, base + bonus - penalty))
+
+
+def preview_cross_stats(mom_g: dict, dad_g: dict) -> dict:
+    """Return rough probabilities for traits in a cross preview."""
+
+    def prob_dominant(mom: list[str], dad: list[str], dom: str, rec: str) -> float:
+        p_cc = (mom.count(rec) / 2.0) * (dad.count(rec) / 2.0)
+        return 1.0 - p_cc
+
+    def prob_vv(mom: list[str], dad: list[str]) -> float:
+        return (mom.count("v") / 2.0) * (dad.count("v") / 2.0)
+
+    def expected_height(mom_g: dict, dad_g: dict) -> float:
+        loci = ["H1", "H2", "H3", "H4"]
+        mean = 0.0
+        for L in loci:
+            m = mom_g.get(L, ["h", "h"])
+            d = dad_g.get(L, ["h", "h"])
+            mean += (m.count("H+") / 2.0) + (d.count("H+") / 2.0)
+        return mean
+
+    loci = set(mom_g.keys()) | set(dad_g.keys())
+    fixed = 0
+    for L in loci:
+        m = mom_g.get(L, [])
+        d = dad_g.get(L, [])
+        if len(m) == 2 and len(d) == 2 and m[0] == m[1] == d[0] == d[1]:
+            fixed += 1
+
+    return {
+        "p_colored": prob_dominant(mom_g.get("C", ["c", "c"]), dad_g.get("C", ["c", "c"]), "C", "c"),
+        "p_variegated": prob_vv(mom_g.get("VAR", ["V", "V"]), dad_g.get("VAR", ["V", "V"])),
+        "h_mean": expected_height(mom_g, dad_g),
+        "stability": (fixed / len(loci)) if loci else 0.0,
+    }
+
+
+def ensure_slots(conn: sqlite3.Connection, user_id: str, n: int = 6) -> None:
+    """Ensure a player has at least n greenhouse slots."""
+    rows = q(conn, "SELECT COUNT(*) AS c FROM slots WHERE user_id=?", (user_id,))
+    current = rows[0]["c"] if rows else 0
+    if current >= n:
+        return
+    for _ in range(n - current):
+        conn.execute(
+            "INSERT INTO slots(id,user_id,soil,light,water,temp) VALUES(?,?,?,?,?,?)",
+            (uid("slot"), user_id, "loam", "med", "ok", "warm"),
+        )
+    conn.commit()
+
+
+def bind_plant_to_slot(conn: sqlite3.Connection, slot_id: str, plant_id: str) -> None:
+    """Attach a plant to a greenhouse slot."""
+    conn.execute("UPDATE slots SET plant_id=? WHERE id=?", (plant_id, slot_id))
+    conn.commit()
+
+
+def get_env_for_plant(conn: sqlite3.Connection, user_id: str, plant_id: str) -> dict:
+    """Return environment settings for a player's plant."""
+    rows = q(conn, "SELECT soil, light, water, temp FROM slots WHERE user_id=? AND plant_id=?", (user_id, plant_id))
+    if not rows:
+        return {"soil": "loam", "light": "med", "water": "ok", "temp": "warm"}
+    r = rows[0]
+    return {"soil": r["soil"], "light": r["light"], "water": r["water"], "temp": r["temp"]}
+
+
+# ------------------------------
 # Genome canon & fingerprint
 # ------------------------------
 def _canonicalize(value: Any) -> Any:

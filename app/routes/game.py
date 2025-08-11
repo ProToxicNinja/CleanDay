@@ -465,10 +465,9 @@ async def pollinate(request: Request, mom_id: str = Form(...), dad_id: str = For
     try:
         g_m = int(str(mom["generation"])[1:]) if mom["generation"] else 1
         g_d = int(str(dad["generation"])[1:]) if dad["generation"] else 1
-        base = f"F{max(g_m, g_d)}"
-    except:
-        base = "F1"
-    child_gen = next_generation_label(base)
+        child_gen = next_generation_label(max(g_m, g_d) + 1)
+    except Exception:
+        child_gen = next_generation_label(1)
     qty = compute_lot_qty(float(mom["health"]), float(dad["health"]), mom["id"] == dad["id"])
 
     env = get_env_for_plant(conn, player_id, mom["id"])
