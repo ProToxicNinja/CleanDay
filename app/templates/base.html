@@ -1,37 +1,29 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Plant Breeder Sim</title>
-    <link rel="stylesheet" href="/static/styles.css">
-    <script src="https://unpkg.com/htmx.org@1.9.2"></script>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Plant Breeder Sim</title>
+  <link rel="stylesheet" href="/static/styles.css"/>
 </head>
 <body>
-    <div class="topbar">
-        <h1>🌱 Plant Breeder Sim</h1>
-        <nav>
-            <a href="/greenhouse">Greenhouse</a>
-            <a href="/breeding">Breeding</a>
-            <form action="/tick" method="post" style="display:inline;">
-                <button class="btn small" type="submit">Tick +1 Day</button>
-            </form>
-            <button
-                class="btn small danger"
-                hx-get="/confirm_new_game"
-                hx-target="#modal"
-                hx-swap="innerHTML"
-                type="button"
-            >New Game</button>
-        </nav>
+  <header class="topbar">
+    <div class="brand">🌱 Plant Breeder Sim</div>
+    <nav class="nav">
+      <a href="/greenhouse">Greenhouse</a>
+      <a href="/breeding">Breeding</a>
+      <a href="/seeds">Seeds</a>
+      <a href="/market">Market</a>
+      <a href="/admin">Admin</a>
+    </nav>
+    <div class="actions">
+      <a class="btn" href="/tick">Tick +1 Day</a>
+      <a class="btn btn-warn" href="/new_game">New Game</a>
     </div>
-    
-    <div class="container">
-        <main>
-            {% block content %}{% endblock %}
-        </main>
-    </div>
+  </header>
 
-    <div id="modal"></div>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
 </body>
 </html>

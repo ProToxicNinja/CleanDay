@@ -1,100 +1,103 @@
-import sqlite3
 from pathlib import Path
-from typing import List
+import sqlite3
+import json
+from typing import Any, Dict
 
 DB_PATH = Path("game.sqlite")
 
-SCHEMA = """
-PRAGMA journal_mode=WAL;
-
-CREATE TABLE IF NOT EXISTS users (
-  id TEXT PRIMARY KEY,
-  name TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS seeds (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  species TEXT NOT NULL,
-  genome_json TEXT NOT NULL,
-  qty INTEGER NOT NULL,
-  generation TEXT DEFAULT 'F1',
-  parents_json TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id)
-);
-
-CREATE TABLE IF NOT EXISTS plants (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  species TEXT NOT NULL,
-  genome_json TEXT NOT NULL,
-  age_days INTEGER NOT NULL DEFAULT 0,
-  health REAL NOT NULL DEFAULT 1.0,
-  generation TEXT DEFAULT 'F1',
-  stage TEXT DEFAULT 'seedling',
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id)
-);
-
-CREATE TABLE IF NOT EXISTS fruits (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  species TEXT NOT NULL,
-  mom_id TEXT NOT NULL,
-  dad_id TEXT NOT NULL,
-  genome_json TEXT NOT NULL,
-  qty INTEGER NOT NULL,
-  generation TEXT NOT NULL,
-  days_remaining INTEGER NOT NULL,
-  status TEXT NOT NULL DEFAULT 'growing', -- growing | ripe | harvested
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id)
-);
-
-CREATE TABLE IF NOT EXISTS slots (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  plant_id TEXT,
-  soil TEXT NOT NULL DEFAULT 'loam',
-  light TEXT NOT NULL DEFAULT 'med',
-  water TEXT NOT NULL DEFAULT 'ok',
-  temp TEXT NOT NULL DEFAULT 'warm',
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id)
-);
-"""
-
-def get_conn() -> sqlite3.Connection:
+def get_conn():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
+def exec1(conn, sql: str, args=()):
+    cur = conn.cursor()
+    cur.execute(sql, args)
+    conn.commit()
+    return cur
+
+def q(conn, sql: str, args=()):
+    cur = conn.cursor()
+    cur.execute(sql, args)
+    return cur.fetchall()
+
+def _table_exists(conn, name: str) -> bool:
+    rows = q(conn, "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,))
+    return bool(rows)
+
+def _column_exists(conn, table: str, col: str) -> bool:
+    rows = q(conn, f"PRAGMA table_info({table})")
+    return any(r["name"] == col for r in rows)
+
 def init_db():
     conn = get_conn()
-    with conn:
-        conn.executescript(SCHEMA)
-        # Migrations if older DB exists
-        try:
-            conn.execute("ALTER TABLE plants ADD COLUMN generation TEXT DEFAULT 'F1'")
-        except sqlite3.OperationalError:
-            pass
-        try:
-            conn.execute("ALTER TABLE seeds ADD COLUMN parents_json TEXT")
-        except sqlite3.OperationalError:
-            pass
-        try:
-            conn.execute("ALTER TABLE plants ADD COLUMN stage TEXT DEFAULT 'seedling'")
-        except sqlite3.OperationalError:
-            pass
-        # fruits and slots tables creation handled by SCHEMA above
+    # users
+    exec1(conn, """
+    CREATE TABLE IF NOT EXISTS users(
+      id TEXT PRIMARY KEY,
+      name TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )""")
+
+    # plants (add name column for labeling)
+    exec1(conn, """
+    CREATE TABLE IF NOT EXISTS plants(
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      species TEXT,
+      genome_json TEXT,
+      age_days INTEGER,
+      health REAL,
+      generation TEXT,
+      stage TEXT,
+      can_breed INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )""")
+    # safe migration: add name if missing
+    if not _column_exists(conn, "plants", "name"):
+        exec1(conn, "ALTER TABLE plants ADD COLUMN name TEXT")
+
+    # seeds (each lot is a genotype + qty)
+    exec1(conn, """
+    CREATE TABLE IF NOT EXISTS seeds(
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      species TEXT,
+      genome_json TEXT,
+      qty INTEGER,
+      generation TEXT,
+      parents_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )""")
+
+    # fruits (in-progress pods before harvest)
+    exec1(conn, """
+    CREATE TABLE IF NOT EXISTS fruits(
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      species TEXT,
+      mom_id TEXT,
+      dad_id TEXT,
+      genome_json TEXT,
+      qty INTEGER,
+      generation TEXT,
+      days_remaining INTEGER,
+      status TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )""")
+
+    # slots (greenhouse)
+    exec1(conn, """
+    CREATE TABLE IF NOT EXISTS slots(
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      plant_id TEXT,
+      soil TEXT,
+      light TEXT,
+      water TEXT,
+      temp TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )""")
+
     conn.close()
-
-def q(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> List[sqlite3.Row]:
-    return conn.execute(sql, params).fetchall()
-
-def exec1(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> None:
-    conn.execute(sql, params)
-    conn.commit()

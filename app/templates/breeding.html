@@ -2,9 +2,9 @@
 {% block content %}
 {% if err %}
   <div class="card" style="border-color:#ea6b6b">
-    {% if err == 'stage' %}Both parents must be at <strong>flowering</strong>.{% endif %}
+    {% if err == 'stage' %}Both parents must be at <strong>flowering</strong> and unused this cycle.{% endif %}
     {% if err == 'species' %}Parents must be the same species.{% endif %}
-    {% if err == 'notfound' %}One or both parents weren't found.{% endif %}
+    {% if err == 'notfound' %}One or both parents weren’t found.{% endif %}
   </div>
 {% endif %}
 
@@ -22,8 +22,8 @@
                   hx-target="#preview"
                   hx-include="#momSel,#dadSel"
                   hx-trigger="change">
-            {% for p in plants %}
-              <option value="{{ p.id }}">{{ p.species }} · {{ p.generation }} · {{ p.appearance }} · H{{ p.height_score }} · {{ p.stage }} ({{ p.id }})</option>
+            {% for p in plants if p.eligible %}
+              <option value="{{ p.id }}">{{ p.species }} · {{ p.generation }} · {{ p.appearance }} · H{{ p.height_score }} · geno {{ p.gfp }} · {{ p.stage }} ({{ p.id }})</option>
             {% endfor %}
           </select>
         </div>
@@ -34,13 +34,16 @@
                   hx-target="#preview"
                   hx-include="#momSel,#dadSel"
                   hx-trigger="change">
-            {% for p in plants %}
-              <option value="{{ p.id }}">{{ p.species }} · {{ p.generation }} · {{ p.appearance }} · H{{ p.height_score }} · {{ p.stage }} ({{ p.id }})</option>
+            {% for p in plants if p.eligible %}
+              <option value="{{ p.id }}">{{ p.species }} · {{ p.generation }} · {{ p.appearance }} · H{{ p.height_score }} · geno {{ p.gfp }} · {{ p.stage }} ({{ p.id }})</option>
             {% endfor %}
           </select>
-          <small class="muted">Parents must be <strong>flowering</strong>. Selfing allowed.</small>
+          <small class="muted">Parents must be <strong>flowering</strong> and unused. Selfing allowed.</small>
         </div>
-        <div id="preview" class="muted">Change a parent to preview genetics.</div>
+        <div id="preview" class="card" style="margin:8px 0;">
+          <strong>Preview</strong>
+          <div class="muted">Change a parent to preview genetics.</div>
+        </div>
         <button class="btn" type="submit">Pollinate (creates fruit)</button>
       </form>
     {% endif %}

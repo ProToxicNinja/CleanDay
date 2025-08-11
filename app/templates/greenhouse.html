@@ -1,115 +1,181 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="grid">
-  <section class="card">
-    <h2>Slots (Environment)</h2>
-    <p class="muted">Edit soil/light/water/temp. Plants planted use the first empty slot.</p>
-    <table class="table">
-      <thead><tr><th>#</th><th>Plant</th><th>Soil</th><th>Light</th><th>Water</th><th>Temp</th><th></th></tr></thead>
-      <tbody>
-      {% for s in slots %}
-        <tr>
-          <td class="mono">{{ loop.index }}</td>
-          <td class="mono">{{ s['plant_id'] or '—' }}</td>
-          <td>
-            <form action="/slot_update" method="post" class="inline">
-              <input type="hidden" name="slot_id" value="{{ s['id'] }}"/>
-              <select name="soil">
-                {% for v in ['loam','sand','clay'] %}
-                  <option value="{{ v }}" {% if s['soil']==v %}selected{% endif %}>{{ v }}</option>
-                {% endfor %}
-              </select>
-          </td>
-          <td>
-              <select name="light">
-                {% for v in ['low','med','high'] %}
-                  <option value="{{ v }}" {% if s['light']==v %}selected{% endif %}>{{ v }}</option>
-                {% endfor %}
-              </select>
-          </td>
-          <td>
-              <select name="water">
-                {% for v in ['under','ok','over'] %}
-                  <option value="{{ v }}" {% if s['water']==v %}selected{% endif %}>{{ v }}</option>
-                {% endfor %}
-              </select>
-          </td>
-          <td>
-              <select name="temp">
-                {% for v in ['cool','warm'] %}
-                  <option value="{{ v }}" {% if s['temp']==v %}selected{% endif %}>{{ v }}</option>
-                {% endfor %}
-              </select>
-          </td>
-          <td><button class="btn small" type="submit">Save</button></form></td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </section>
+<div class="grid grid-gap-lg" style="grid-template-columns: 1fr;">
 
-  <section class="card">
-    <h2>Starter & Stored Seeds</h2>
-    {% if seeds|length == 0 %}
-      <p>No seeds. Start a <em>New Game</em> to get a starter pack.</p>
-    {% else %}
-      <table class="table">
-        <thead><tr><th>Species</th><th>Lot ID</th><th>Qty</th><th>Gen</th><th>Action</th></tr></thead>
-        <tbody>
-        {% for s in seeds %}
-          <tr>
-            <td>{{ s['species'] }}</td>
-            <td class="mono">{{ s['id'] }}</td>
-            <td>{{ s['qty'] }}</td>
-            <td>{{ s['generation'] }}</td>
-            <td>
-              {% if s['qty'] > 0 %}
-              <form action="/plant_seed" method="post">
-                <input type="hidden" name="seed_id" value="{{ s['id'] }}"/>
-                <button class="btn" type="submit">Plant 1 (first empty slot)</button>
-              </form>
-              {% else %}<span class="muted">Empty</span>{% endif %}
-            </td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    {% endif %}
-  </section>
-
-  <section class="card">
-    <h2>Greenhouse</h2>
-    {% if plants|length == 0 %}
-      <p>No plants yet. Plant a seed from your seeds list.</p>
-    {% else %}
-      <div class="cards">
-        {% for p in plants %}
-        <div class="plant">
-          <div class="plant-head">
-            <strong>{{ p.species }} · {{ p.generation }}</strong>
-            <span class="muted">Age {{ p.age_days }}d · {{ p.stage }} · Health {{ p.health }}</span>
-          </div>
-          <div class="plant-body" style="display:flex; gap:12px; align-items:center;">
-            <img alt="sprite" width="80" height="60" src="/sprite/{{ p.species|lower }}/{{ p.stage|lower }}.svg"/>
-            <div>
-              <div>Appearance: <strong>{{ p.appearance }}</strong></div>
-              <div>Height score: <strong>{{ p.height_score }}</strong></div>
-            </div>
-          </div>
-        </div>
-        {% endfor %}
+  <section class="card" style="padding:12px;">
+    <div class="card-head">
+      <h2>Greenhouse</h2>
+      <div class="row-wrap">
+        <div class="badge">Day {{ day }}</div>
       </div>
-    {% endif %}
+    </div>
+
+    <div id="greenhouse-svg-container" class="table-wrap" style="max-height:72vh; min-height:420px;">
+      <svg viewBox="0 0 1400 880" width="100%" height="auto" preserveAspectRatio="xMidYMid meet">
+        <!-- greenhouse frame -->
+        <rect x="20" y="20" width="1360" height="840" rx="24"
+              fill="#0f1422" stroke="#2a3147" stroke-width="3"/>
+        <g opacity="0.5" stroke="#2a3147" stroke-width="2">
+          <line x1="20" y1="100" x2="1380" y2="100"/>
+          <line x1="20" y1="200" x2="1380" y2="200"/>
+          <line x1="20" y1="300" x2="1380" y2="300"/>
+          <line x1="20" y1="400" x2="1380" y2="400"/>
+          <line x1="20" y1="500" x2="1380" y2="500"/>
+          <line x1="20" y1="600" x2="1380" y2="600"/>
+          <line x1="20" y1="700" x2="1380" y2="700"/>
+        </g>
+
+        {% set cols = 3 %}
+        {% set tile = 360 %}       {# bigger tiles #}
+        {% set pad  = 48 %}        {# inner padding #}
+        {% set gutter = 28 %}      {# spacing between plots #}
+
+        {% for s in slots %}
+          {% set idx = loop.index0 %}
+          {% set col = idx % cols %}
+          {% set row = idx // cols %}
+          {% set x = 60 + col * (tile + gutter) %}
+          {% set y = 100 + row * (tile + gutter) %}
+          {% set soil_top = y + (tile - pad) - 106 %}
+
+          {# ---------- visual mappings ---------- #}
+          {% set soil_fill =
+             '#5a412f' if s.soil == 'loam'
+             else '#caa96a' if s.soil == 'sand'
+             else '#8b4b2d' %}
+          {% set soil_stroke =
+             '#2a1d13' if s.soil == 'loam'
+             else '#8f6c37' if s.soil == 'sand'
+             else '#4b2416' %}
+          {% set light_tint =
+             'rgba(255,220,90,0.10)' if s.light == 'high'
+             else 'rgba(255,220,90,0.04)' if s.light == 'med'
+             else 'rgba(255,255,255,0.02)' %}
+          {% set light_badge =
+             '#ffd75a' if s.light == 'high'
+             else '#e7b84a' if s.light == 'med'
+             else '#7a8699' %}
+          {% set water_badge =
+             '#59a8ff' if s.water == 'ok'
+             else '#3ad0c0' if s.water == 'over'
+             else '#ef6b68' %}
+          {% set temp_badge =
+             '#ff8f66' if s.temp == 'warm'
+             else '#67a8ff' %}
+
+          <g style="cursor:pointer;"
+             hx-get="/slot_modal/{{ s.id }}"
+             hx-target="#modal-content"
+             hx-trigger="click">
+
+            <!-- plot panel -->
+            <rect x="{{ x }}" y="{{ y }}" width="{{ tile - pad }}" height="{{ tile - pad }}"
+                  rx="22" fill="#1a2135" stroke="#2a3147" stroke-width="2.5"/>
+            <!-- ambient light tint -->
+            <rect x="{{ x }}" y="{{ y }}" width="{{ tile - pad }}" height="{{ tile - pad }}"
+                  rx="22" fill="{{ light_tint }}"/>
+
+            <!-- soil tray -->
+            <rect x="{{ x + 20 }}" y="{{ soil_top }}" width="{{ tile - pad - 40 }}" height="90"
+                  rx="14" fill="{{ soil_fill }}" stroke="{{ soil_stroke }}" stroke-width="2"/>
+
+            {# Water overlays on soil #}
+            {% if s.water == 'under' %}
+              <path d="M {{ x+44 }} {{ soil_top+18 }} l 32 14 l -12 12"
+                    fill="none" stroke="#2a1d13" stroke-width="2" opacity="0.55"/>
+              <path d="M {{ x+110 }} {{ soil_top+14 }} l 16 14 l -10 20"
+                    fill="none" stroke="#2a1d13" stroke-width="2" opacity="0.45"/>
+              <path d="M {{ x+190 }} {{ soil_top+24 }} l -20 10 l 10 14"
+                    fill="none" stroke="#2a1d13" stroke-width="2" opacity="0.55"/>
+            {% elif s.water == 'over' %}
+              <ellipse cx="{{ x + 108 }}" cy="{{ soil_top + 58 }}" rx="30" ry="12"
+                       fill="#58a8ff" opacity="0.25"/>
+              <ellipse cx="{{ x + 198 }}" cy="{{ soil_top + 70 }}" rx="22" ry="9"
+                       fill="#58a8ff" opacity="0.22"/>
+              <ellipse cx="{{ x + 70 }}" cy="{{ soil_top + 76 }}" rx="14" ry="6"
+                       fill="#58a8ff" opacity="0.18"/>
+            {% endif %}
+
+            <!-- plot label -->
+            <rect x="{{ x }}" y="{{ y - 30 }}" width="220" height="24" rx="10"
+                  fill="#111827" stroke="#2a3147" />
+            <text x="{{ x + 12 }}" y="{{ y - 12 }}" fill="#9aa0ae" font-size="12" class="mono">
+              plot {{ loop.index }}
+            </text>
+
+            {% if s.plant %}
+              {% set stage = s.plant.stage or 'seedling' %}
+              {% set bust = stage ~ '-' ~ s.plant.health ~ '-' ~ s.plant.updated_at ~ '-' ~ day %}
+
+              {% set pw = 58 %}
+              {% if stage == 'juvenile' %}{% set pw = 82 %}
+              {% elif stage == 'mature' %}{% set pw = 104 %}
+              {% elif stage == 'flowering' %}{% set pw = 116 %}
+              {% elif stage == 'spent' %}{% set pw = 84 %}{% endif %}
+              {% set ph = (pw * 0.9) | int %}
+              {% set px = x + (tile - pad)/2 - pw/2 %}
+              {% set py = soil_top - ph + 10 %}
+
+              <!-- centered genome/name pill (replaces old stage label) -->
+              {% set pill_w = 200 %}
+              {% set pill_x = x + (tile - pad)/2 - pill_w/2 %}
+              <rect x="{{ pill_x }}" y="{{ y + 12 }}" width="{{ pill_w }}" height="28" rx="12"
+                    fill="#0b0f1b" stroke="#2a3147"/>
+              <text x="{{ pill_x + pill_w/2 }}" y="{{ y + 31 }}" fill="#e7ebff" text-anchor="middle"
+                    font-size="13" class="mono">
+                {{ s.plant.generation }} · geno {{ s.plant.gfp }}
+              </text>
+
+              <image href="/sprite/plant/{{ s.plant.id }}.svg?v={{ bust }}"
+                     x="{{ px }}" y="{{ py }}" width="{{ pw }}" height="{{ ph }}" />
+            {% else %}
+              <text x="{{ x + (tile - pad)/2 }}" y="{{ soil_top + 30 }}"
+                    fill="#e2e6ef" font-size="16" text-anchor="middle">Empty</text>
+              <text x="{{ x + (tile - pad)/2 }}" y="{{ soil_top + 52 }}"
+                    fill="#7aa8ff" font-size="12" text-anchor="middle">Click to plant</text>
+            {% endif %}
+
+            <!-- environment badges (now fit comfortably) -->
+            <g>
+              <!-- soil -->
+              <rect x="{{ x + 14 }}" y="{{ y + (tile - pad) - 38 }}" width="82" height="24" rx="12"
+                    fill="#0f1422" stroke="{{ soil_stroke }}" />
+              <circle cx="{{ x + 28 }}" cy="{{ y + (tile - pad) - 26 }}" r="6" fill="{{ soil_fill }}"/>
+              <text x="{{ x + 42 }}" y="{{ y + (tile - pad) - 22 }}" font-size="12" fill="#cfd6ea"> {{ s.soil }} </text>
+              <!-- light -->
+              <rect x="{{ x + 104 }}" y="{{ y + (tile - pad) - 38 }}" width="82" height="24" rx="12"
+                    fill="#0f1422" stroke="#2a3147" />
+              <circle cx="{{ x + 118 }}" cy="{{ y + (tile - pad) - 26 }}" r="6" fill="{{ light_badge }}"/>
+              <text x="{{ x + 132 }}" y="{{ y + (tile - pad) - 22 }}" font-size="12" fill="#cfd6ea"> {{ s.light }} </text>
+              <!-- water -->
+              <rect x="{{ x + 194 }}" y="{{ y + (tile - pad) - 38 }}" width="82" height="24" rx="12"
+                    fill="#0f1422" stroke="#2a3147" />
+              <circle cx="{{ x + 208 }}" cy="{{ y + (tile - pad) - 26 }}" r="6" fill="{{ water_badge }}"/>
+              <text x="{{ x + 222 }}" y="{{ y + (tile - pad) - 22 }}" font-size="12" fill="#cfd6ea"> {{ s.water }} </text>
+              <!-- temp -->
+              <rect x="{{ x + 284 }}" y="{{ y + (tile - pad) - 38 }}" width="82" height="24" rx="12"
+                    fill="#0f1422" stroke="#2a3147" />
+              <circle cx="{{ x + 298 }}" cy="{{ y + (tile - pad) - 26 }}" r="6" fill="{{ temp_badge }}"/>
+              <text x="{{ x + 312 }}" y="{{ y + (tile - pad) - 22 }}" font-size="12" fill="#cfd6ea"> {{ s.temp }} </text>
+            </g>
+
+          </g>
+        {% endfor %}
+      </svg>
+    </div>
   </section>
 
-  <section class="card" style="grid-column: 1 / -1;">
+  <section class="card" style="grid-column:1 / -1;">
     <h2>Fruits & Pods</h2>
     {% if fruits|length == 0 %}
       <p class="muted">No fruits yet. Breed flowering plants to set fruit.</p>
     {% else %}
-      <table class="table">
-        <thead><tr><th>Species</th><th>Fruit ID</th><th>Gen</th><th>Qty</th><th>Status</th><th>Action</th></tr></thead>
-        <tbody>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr><th>Species</th><th>Fruit ID</th><th>Gen</th><th>Qty</th><th>Status</th><th>Action</th></tr>
+          </thead>
+          <tbody>
           {% for f in fruits %}
             <tr>
               <td>{{ f['species'] }}</td>
@@ -131,9 +197,31 @@
               </td>
             </tr>
           {% endfor %}
-        </tbody>
-      </table>
+          </tbody>
+        </table>
+      </div>
     {% endif %}
   </section>
+
 </div>
+
+<div id="modal" style="display:none; position:fixed; inset:0;
+     background:rgba(0,0,0,0.6); align-items:center; justify-content:center;">
+  <div id="modal-content" style="background:#141a2a; border:1px solid #2a3147; border-radius:14px; width:min(620px, 92vw); padding:14px;">
+  </div>
+</div>
+
+<script>
+  document.body.addEventListener('htmx:afterOnLoad', function(e) {
+    if (e.detail.target && e.detail.target.id === 'modal-content') {
+      document.getElementById('modal').style.display = 'flex';
+    }
+  });
+  document.getElementById('modal').addEventListener('click', function(e){
+    if (e.target.id === 'modal') {
+      document.getElementById('modal').style.display = 'none';
+      document.getElementById('modal-content').innerHTML = '';
+    }
+  });
+</script>
 {% endblock %}

@@ -1,93 +1,214 @@
-from typing import Tuple, Dict, List
-import random
+import json, random, hashlib
+from typing import Dict, Tuple
+from collections import Counter
 
-# Base growth model (same for all species for now)
-BASE_THRESHOLDS = {
-    "seedling": 0,
-    "juvenile": 3,
-    "mature": 7,
-    "flowering": 9,
-    "spent": 18
-}
-BASE_FRUIT_DAYS = 4
+# --------------------------
+# Helpers / constants
+# --------------------------
+def _hash_int(s: str) -> int:
+    return int(hashlib.sha256(s.encode("utf-8")).hexdigest()[:8], 16)
 
-def thresholds_with_env(env: Dict[str, str]) -> Dict[str, int]:
+CLR_ALLELES = ["R","P","G","Y","T"]
+DOM_ORDER = {"R": 5, "P": 4, "G": 3, "Y": 2, "T": 1}
+CODE_TO_NAME = {"R":"red","P":"purple","G":"green","Y":"yellow","T":"teal"}
+
+MUT_COLOR = 0.02  # per-locus
+MUT_VAR   = 0.02
+MUT_PAT   = 0.02
+
+# --------------------------
+# Growth model (env-aware)
+# --------------------------
+def simple_tick(age_days: int, health: float, env: Dict) -> Tuple[int, float, str]:
+    age = age_days + 1
+    if age < 5: stage = "seedling"
+    elif age < 12: stage = "juvenile"
+    elif age < 18: stage = "mature"
+    elif age < 26: stage = "flowering"
+    else: stage = "spent"
+
+    if env.get("soil") == "sand":  health *= 0.995
+    elif env.get("soil") == "clay": health *= 0.992
+    if env.get("water") == "under": health *= 0.992
+    elif env.get("water") == "over": health *= 0.990
+
+    health = max(0.1, min(1.0, health))
+    return int(age), float(health), stage
+
+# --------------------------
+# Recombination
+# --------------------------
+def _pick_from_pair(rng: random.Random, pair):
+    return pair[rng.randrange(2)]
+
+def _dominant_color_code(a: str, b: str) -> str:
+    ra, rb = DOM_ORDER.get(a,3), DOM_ORDER.get(b,3)
+    return a if ra >= rb else b
+
+def recombine_genomes(mom: Dict, dad: Dict, rng: random.Random | None = None, allow_mut: bool = True) -> Dict:
     """
-    Adjust stage thresholds based on environment.
-    Negative offset = reaches stage earlier (faster).
+    Mendelian recombination with optional mutation.
+    - rng: pass Random for deterministic outcomes; fallback to global random.
+    - allow_mut: if False, skip mutations.
     """
-    soil, light, water, temp = env["soil"], env["light"], env["water"], env["temp"]
-    offs = {"juvenile": 0, "mature": 0, "flowering": 0, "spent": 0}
+    rng = rng or random
+    loci = set(mom.keys()) | set(dad.keys())
+    child: Dict = {}
+    for L in loci:
+        ma = mom.get(L, ["h","h"])
+        da = dad.get(L, ["h","h"])
+        child[L] = [_pick_from_pair(rng, ma), _pick_from_pair(rng, da)]
+    for L in ("H1","H2","H3","H4"):
+        child.setdefault(L, ["h","h"])
 
-    # Soil
-    if soil == "sand": offs["flowering"] -= 1  # faster to flower
-    if soil == "clay": offs["mature"] -= 1; offs["flowering"] += 1  # stronger but slower to flower
+    if not allow_mut:
+        return child
 
-    # Light
-    if light == "low": offs["mature"] += 1; offs["flowering"] += 1
-    if light == "high": offs["mature"] -= 1; offs["flowering"] -= 1
+    # color
+    if rng.random() < MUT_COLOR:
+        child.setdefault("CLR", ["G","G"])
+        child["CLR"][rng.randrange(2)] = rng.choice(CLR_ALLELES)
+    # variegation
+    if rng.random() < MUT_VAR:
+        child.setdefault("VAR", ["V","V"])
+        i = rng.randrange(2)
+        child["VAR"][i] = "v" if child["VAR"][i] == "V" else "V"
+    # pattern
+    if rng.random() < MUT_PAT:
+        child.setdefault("PAT", ["N","N"])
+        i = rng.randrange(2)
+        child["PAT"][i] = "s" if child["PAT"][i] == "N" else "N"
 
-    # Water
-    if water == "under": offs["mature"] += 1; offs["flowering"] += 1
-    if water == "over": offs["mature"] += 0; offs["flowering"] += 0  # small/no change
-
-    # Temp
-    if temp == "cool": offs["flowering"] += 1
-    if temp == "warm": offs["flowering"] -= 1
-
-    # Build adjusted thresholds, never less than previous stage +1
-    t = dict(BASE_THRESHOLDS)
-    t["juvenile"] = max(1, t["juvenile"] + offs["juvenile"])
-    t["mature"]   = max(t["juvenile"]+1, t["mature"] + offs["mature"])
-    t["flowering"]= max(t["mature"]+1,  t["flowering"] + offs["flowering"])
-    t["spent"]    = max(t["flowering"]+2, t["spent"] + offs["spent"])
-    return t
-
-def compute_stage(age_days: int, env: Dict[str, str] | None = None) -> str:
-    T = thresholds_with_env(env) if env else BASE_THRESHOLDS
-    if age_days >= T["spent"]: return "spent"
-    if age_days >= T["flowering"]: return "flowering"
-    if age_days >= T["mature"]: return "mature"
-    if age_days >= T["juvenile"]: return "juvenile"
-    return "seedling"
-
-def health_decay(stage: str, env: Dict[str, str]) -> float:
-    decay = 0.003 if stage in ("seedling","juvenile") else 0.006
-    # Soil: clay/loam support health; sand a bit harsher
-    if env["soil"] == "clay": decay -= 0.001
-    if env["soil"] == "sand": decay += 0.001
-    # Water: under hurts; over slightly hurts
-    if env["water"] == "under": decay += 0.003
-    if env["water"] == "over": decay += 0.001
-    # Temp: cool helps health a touch
-    if env["temp"] == "cool": decay -= 0.001
-    return max(0.001, decay)
-
-def fruit_days_with_env(env: Dict[str, str]) -> int:
-    d = BASE_FRUIT_DAYS
-    if env["light"] == "high": d -= 1
-    if env["temp"] == "warm": d -= 1
-    if env["water"] == "under": d += 1
-    return max(2, d)
-
-def simple_tick(age_days: int, health: float, env: Dict[str, str]) -> Tuple[int, float, str]:
-    """Advance one day: apply env-influenced stage + health."""
-    age_days += 1
-    stage = compute_stage(age_days, env)
-    health = max(0.0, min(1.0, health - health_decay(stage, env)))
-    return age_days, health, stage
-
-def recombine_genomes(mom: Dict[str, List[str]], dad: Dict[str, List[str]]) -> Dict[str, List[str]]:
-    child = {}
-    all_loci = set(mom.keys()) | set(dad.keys())
-    for locus in all_loci:
-        m_alleles = mom.get(locus) or dad.get(locus) or ["h","h"]
-        d_alleles = dad.get(locus) or mom.get(locus) or ["h","h"]
-        child[locus] = [random.choice(m_alleles), random.choice(d_alleles)]
     return child
 
-# Legacy compatibility for GROWTH references
-GROWTH = {
-    "fruit_days": BASE_FRUIT_DAYS,
-    "stage_thresholds": BASE_THRESHOLDS
-}
+# --------------------------
+# Fruit timing
+# --------------------------
+def fruit_days_with_env(env: Dict) -> int:
+    base = 6
+    if env.get("light") == "high": base -= 1
+    if env.get("soil") == "clay": base += 1
+    return max(3, base)
+
+# --------------------------
+# Preview (deterministic, WITH mutations)
+# --------------------------
+def preview_cross_stats(mom_g: Dict, dad_g: Dict, trials: int = 400) -> Dict:
+    """
+    Deterministic Monte Carlo preview:
+    - Seeded by parents, so same pair => same results.
+    - Includes mutation effects, but deterministically (no UI flicker).
+    Also reports how often mutations changed color / VAR / PAT in the sample.
+    """
+    seed_src = json.dumps({"m": mom_g, "d": dad_g}, sort_keys=True)
+    rng = random.Random(_hash_int(seed_src))
+
+    color_counts = Counter()
+    vv_count = 0
+    h_sum = 0.0
+    stability_sum = 0.0
+
+    mut_any = 0
+    mut_color_changed = 0
+    mut_var_changed = 0
+    mut_pat_changed = 0
+
+    for _ in range(trials):
+        # Step 1: base recombination (no mutation)
+        base_child = recombine_genomes(mom_g, dad_g, rng=rng, allow_mut=False)
+
+        # Keep a copy to mutate deterministically
+        child = json.loads(json.dumps(base_child))
+
+        # Apply deterministic mutations using the same rng
+        color_mut = False
+        var_mut = False
+        pat_mut = False
+
+        # Color mutation
+        if rng.random() < MUT_COLOR:
+            child.setdefault("CLR", ["G","G"])
+            idx = rng.randrange(2)
+            before = child["CLR"][idx]
+            child["CLR"][idx] = rng.choice(CLR_ALLELES)
+            color_mut = (child["CLR"][idx] != before)
+
+        # Variegation mutation
+        if rng.random() < MUT_VAR:
+            child.setdefault("VAR", ["V","V"])
+            idx = rng.randrange(2)
+            before = child["VAR"][idx]
+            child["VAR"][idx] = "v" if before == "V" else "V"
+            var_mut = (child["VAR"][idx] != before)
+
+        # Pattern mutation
+        if rng.random() < MUT_PAT:
+            child.setdefault("PAT", ["N","N"])
+            idx = rng.randrange(2)
+            before = child["PAT"][idx]
+            child["PAT"][idx] = "s" if before == "N" else "N"
+            pat_mut = (child["PAT"][idx] != before)
+
+        if color_mut or var_mut or pat_mut:
+            mut_any += 1
+
+        # Track whether mutation changed expressed color (dominance)
+        a0, b0 = base_child.get("CLR", ["G","G"])
+        a1, b1 = child.get("CLR", ["G","G"])
+        base_code = _dominant_color_code(a0, b0)
+        new_code  = _dominant_color_code(a1, b1)
+        if new_code != base_code:
+            mut_color_changed += 1
+
+        if var_mut:
+            mut_var_changed += 1
+        if pat_mut:
+            mut_pat_changed += 1
+
+        # Phenotype tallies from the potentially mutated child
+        a, b = child.get("CLR", ["G","G"])
+        dom = _dominant_color_code(a, b)
+        color_counts.update([dom])
+
+        hs = 0
+        for L in ("H1","H2","H3","H4"):
+            aa = child.get(L, ["h","h"])
+            hs += (1 if aa[0]=="H+" else 0) + (1 if aa[1]=="H+" else 0)
+        h_sum += min(8, hs)
+
+        var = child.get("VAR", ["V","V"])
+        if var[0] == "v" and var[1] == "v":
+            vv_count += 1
+
+        homo = 0; total = 0
+        for L, aa in child.items():
+            if isinstance(aa, list) and len(aa)==2:
+                total += 1
+                if aa[0] == aa[1]:
+                    homo += 1
+        stability_sum += (homo / max(1, total))
+
+    if color_counts:
+        top_code, top_cnt = color_counts.most_common(1)[0]
+        top_color = CODE_TO_NAME.get(top_code, "green")
+        p_top = top_cnt / trials
+    else:
+        top_color, p_top = "green", 1.0
+
+    p_non_green = 1.0 - (color_counts.get("G", 0) / trials)
+
+    return {
+        # legacy / existing fields
+        "p_colored": p_non_green,
+        "p_variegated": vv_count / trials,
+        "h_mean": h_sum / trials,
+        "stability": stability_sum / trials,
+        "top_color": top_color,
+        "p_top_color": p_top,
+        # new explicit mutation diagnostics (all deterministic)
+        "p_any_mutation": mut_any / trials,
+        "p_color_changed_by_mut": mut_color_changed / trials,
+        "p_var_locus_mutated": mut_var_changed / trials,
+        "p_pat_locus_mutated": mut_pat_changed / trials,
+    }
+

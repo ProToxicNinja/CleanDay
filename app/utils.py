@@ -1,190 +1,220 @@
-import json, uuid, random
+# app/utils.py
+import json
+import hashlib
+import random
+import sqlite3
+import time
 from pathlib import Path
-from app.db import get_conn, exec1, q
+from typing import Any, Dict, Iterable, Tuple, List
 
-TRAITS_PATH = Path("app/genetics/traits.json")
-TRAITS = json.loads(TRAITS_PATH.read_text())
+from fastapi.templating import Jinja2Templates
+from fastapi.responses import HTMLResponse
+from fastapi import Request
 
-SPECIES = ["Pea", "Tomato", "Marigold"]
+# ------------------------------
+# Paths / Jinja environment
+# ------------------------------
+ROOT = Path(__file__).resolve().parents[1]
+TEMPLATES_DIR = ROOT / "app" / "templates"
+DB_FILE = ROOT / "game.sqlite"
 
-def uid(prefix: str) -> str:
-    return f"{prefix}_{uuid.uuid4().hex[:8]}"
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
-def ensure_slots(conn, user_id: str, n: int = 6):
-    rows = q(conn, "SELECT COUNT(*) AS c FROM slots WHERE user_id=?", (user_id,))
-    if rows[0]["c"] >= n: return
-    # create N default slots
-    for i in range(n - rows[0]["c"]):
-        exec1(conn, "INSERT INTO slots(id,user_id,soil,light,water,temp) VALUES(?,?,?,?,?,?)",
-              (uid("slot"), user_id, "loam","med","ok","warm"))
 
-def get_first_empty_slot(conn, user_id: str):
-    rows = q(conn, "SELECT * FROM slots WHERE user_id=? AND (plant_id IS NULL OR plant_id='') LIMIT 1", (user_id,))
-    return rows[0] if rows else None
+# ------------------------------
+# DB helpers
+# ------------------------------
+def get_conn() -> sqlite3.Connection:
+    """Open a SQLite connection with Row factory."""
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    return conn
 
-def bind_plant_to_slot(conn, slot_id: str, plant_id: str):
-    exec1(conn, "UPDATE slots SET plant_id=? WHERE id=?", (plant_id, slot_id))
 
-def unbind_plant_from_slot(conn, plant_id: str):
-    exec1(conn, "UPDATE slots SET plant_id=NULL WHERE plant_id=?", (plant_id,))
+def q(conn: sqlite3.Connection, sql: str, params: Tuple[Any, ...] | Iterable[Any] = ()) -> List[dict]:
+    """Run a query and return list of dict rows."""
+    cur = conn.execute(sql, tuple(params))
+    rows = cur.fetchall()
+    return [dict(r) for r in rows]
 
-def get_env_for_plant(conn, user_id: str, plant_id: str):
-    rows = q(conn, "SELECT soil, light, water, temp FROM slots WHERE user_id=? AND plant_id=?", (user_id, plant_id))
-    if not rows:
-        return {"soil":"loam","light":"med","water":"ok","temp":"warm"}
-    r = rows[0]
-    return {"soil":r["soil"],"light":r["light"],"water":r["water"],"temp":r["temp"]}
 
-def get_or_create_player() -> str:
-    pid = uuid.uuid4().hex
-    conn = get_conn()
-    exec1(conn, "INSERT OR REPLACE INTO users(id, name) VALUES(?, ?)", (pid, f"Player-{pid[:4]}"))
-    ensure_slots(conn, pid, 6)
-    rows = q(conn, "SELECT COUNT(*) AS c FROM seeds WHERE user_id=?", (pid,))
-    if rows[0]["c"] == 0:
-        grant_starter_pack(conn, pid)
-    conn.close()
-    return pid
+# ------------------------------
+# Rendering helper
+# ------------------------------
+def render(request: Request, template_name: str, context: Dict[str, Any] | None = None) -> HTMLResponse:
+    """Render a Jinja template into an HTMLResponse (adds request automatically)."""
+    context = context or {}
+    context["request"] = request
+    return templates.TemplateResponse(template_name, context)
 
-def _wchoice(pairs):
-    # pairs: list[(value, weight)], weights needn't sum to 1
-    total = sum(w for _, w in pairs)
-    r = random.random() * total
-    acc = 0.0
-    for v, w in pairs:
-        acc += w
-        if r <= acc:
-            return v
-    return pairs[-1][0]
 
-def random_genome():
-    genome = {}
-    for trait in TRAITS["traits"]:
-        t = trait["type"]
-        if t == "mendelian":
-            locus = trait["loci"][0]
-            dom, rec = trait["dominance"]
-            p_dom = trait["alleles"][dom]["p"]
-            p_rec = trait["alleles"][rec]["p"]
-            a1 = _wchoice([(dom, p_dom), (rec, p_rec)])
-            a2 = _wchoice([(dom, p_dom), (rec, p_rec)])
-            genome[locus] = [a1, a2]
+# ------------------------------
+# ID / time helpers
+# ------------------------------
+def now_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-        elif t == "polygenic":
-            p_plus = trait["alleles"]["H+"]["p"]
-            p_min  = trait["alleles"]["h"]["p"]
-            for locus in trait["loci"]:
-                a1 = _wchoice([("H+", p_plus), ("h", p_min)])
-                a2 = _wchoice([("H+", p_plus), ("h", p_min)])
-                genome[locus] = [a1, a2]
 
-        elif t == "epistatic":
-            locus = trait["loci"][0]
-            p_on  = trait["alleles"]["V"]["p"]
-            p_off = trait["alleles"]["v"]["p"]
-            a1 = _wchoice([("V", p_on), ("v", p_off)])
-            a2 = _wchoice([("V", p_on), ("v", p_off)])
-            genome[locus] = [a1, a2]
-    return genome
+def uid(prefix: str | None = None) -> str:
+    """
+    Short unique id. If prefix is given, returns <prefix>_<id>.
+    Uses time (ms) + random nibble for low collision chance.
+    """
+    base = f"{int(time.time() * 1000):x}{random.randrange(0, 16):x}"[-8:]
+    return f"{prefix}_{base}" if prefix else base
 
-def grant_starter_pack(conn, user_id: str):
-    ensure_slots(conn, user_id, 6)
-    for sp in SPECIES:
-        genome = random_genome()
-        exec1(conn,
-          "INSERT INTO seeds(id,user_id,species,genome_json,qty,generation,parents_json) VALUES(?,?,?,?,?,?,?)",
-          (uid("seed"), user_id, sp, json.dumps(genome), 10, "F1", json.dumps({"mom": None, "dad": None})))
 
-def express_phenotype(genome: dict):
-    color = "white"
-    variegation = False
-    height_score = 0
+# ------------------------------
+# Genome canon & fingerprint
+# ------------------------------
+def _canonicalize(value: Any) -> Any:
+    """
+    Recursively sort dict keys; sort lists when elements are simple (str/int).
+    Keeps structure stable so two equivalent genomes hash the same.
+    """
+    if isinstance(value, dict):
+        return {k: _canonicalize(value[k]) for k in sorted(value.keys())}
+    if isinstance(value, list):
+        if all(isinstance(x, (str, int, float)) for x in value):
+            try:
+                return sorted(value)
+            except Exception:
+                return [_canonicalize(x) for x in value]
+        return [_canonicalize(x) for x in value]
+    return value
 
-    for trait in TRAITS["traits"]:
-        ttype = trait["type"]
-        if ttype == "mendelian" and trait["id"] == "petal_color":
-            locus = trait["loci"][0]
-            dom, rec = trait["dominance"]
-            alleles = genome.get(locus, [rec, rec])
-            color = "colored" if dom in alleles else "white"
 
-        if ttype == "epistatic" and trait["id"] == "variegation":
-            locus = trait["loci"][0]
-            a_on = trait["alleles"]["V"]["code"]
-            alleles = genome.get(locus, [a_on, a_on])
-            variegation = (alleles[0] == "v" and alleles[1] == "v")
+def canonical_genome(genome: Dict[str, Any] | str) -> Dict[str, Any]:
+    """
+    Return a canonicalized genome dict (NOT a JSON string).
+    - Sorts all keys
+    - Sorts allele lists when items are scalar
+    """
+    if genome is None:
+        return {}
+    if isinstance(genome, str):
+        try:
+            genome = json.loads(genome)
+        except Exception:
+            return {"RAW": str(genome)}
+    return _canonicalize(genome)
 
-        if ttype == "polygenic" and trait["id"] == "height":
-            total = 0
-            for locus in trait["loci"]:
-                a = genome.get(locus, ["h","h"])
-                total += (1 if a[0] == "H+" else 0) + (1 if a[1] == "H+" else 0)
-            height_score = total
 
-    appearance = "variegated " + color if variegation else color
-    return { "appearance": appearance, "height_score": height_score }
+def genome_fingerprint(genome: Dict[str, Any] | str, length: int = 6) -> str:
+    """
+    Stable short hash (hex) of the canonical genome.
+    Default length: 6 chars (shown as 'geno abc123' in UI).
+    """
+    canon = canonical_genome(genome)
+    data = json.dumps(canon, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return hashlib.sha1(data).hexdigest()[:length]
 
-def next_generation_label(gen: str | None) -> str:
-    try:
-        if not gen or not gen.upper().startswith("F"):
-            return "F1"
-        n = int(gen[1:])
-        return f"F{n+1}"
-    except:
-        return "F1"
 
-def compute_lot_qty(mom_health: float, dad_health: float, selfing: bool) -> int:
-    base = random.randint(4, 10)
-    vigor = (mom_health + dad_health) / 2.0
-    bonus = int(vigor * 4)
-    penalty = 1 if selfing else 0
-    return max(2, min(24, base + bonus - penalty))
+# ------------------------------
+# Phenotype expression (for UI & gameplay)
+# ------------------------------
+# Color dominance mapping for CLR locus
+_DOM_ORDER = {"R": 5, "P": 4, "G": 3, "Y": 2, "T": 1}
+_CLR_TO_NAME = {"R": "red", "P": "purple", "G": "green", "Y": "yellow", "T": "teal"}
 
-# ---------- Genetics UX helpers ----------
+def _resolve_color_name(genome: Dict[str, Any]) -> str:
+    # direct simplified key
+    c = (genome or {}).get("c")
+    if isinstance(c, str):
+        return c
+    # locus-based
+    clr = (genome or {}).get("CLR")
+    if isinstance(clr, list) and len(clr) >= 1:
+        a = clr[0]
+        b = clr[1] if len(clr) > 1 else a
+        code = a if _DOM_ORDER.get(a, 3) >= _DOM_ORDER.get(b, 3) else b
+        return _CLR_TO_NAME.get(code, "green")
+    return "green"
 
-def prob_dominant(mom: list[str], dad: list[str], dom: str, rec: str) -> float:
-    # P(child shows dominant phenotype) = 1 - P(cc)
-    mom_pass_rec = mom.count(rec) / 2.0
-    dad_pass_rec = dad.count(rec) / 2.0
-    p_cc = mom_pass_rec * dad_pass_rec
-    return 1.0 - p_cc
+def _resolve_variegation(genome: Dict[str, Any]) -> bool:
+    if "vv" in (genome or {}):
+        v = genome.get("vv")
+        return bool(v) and str(v).lower() not in ("0", "false", "none", "")
+    VAR = (genome or {}).get("VAR")
+    if isinstance(VAR, list) and len(VAR) >= 2:
+        # recessive vv
+        a, b = VAR[0], VAR[1]
+        return str(a).lower() == "v" and str(b).lower() == "v"
+    return False
 
-def prob_vv(mom: list[str], dad: list[str]) -> float:
-    # P(vv) = P(m passes v) * P(d passes v)
-    pm = mom.count("v") / 2.0
-    pd = dad.count("v") / 2.0
-    return pm * pd
+def _resolve_height_score(genome: Dict[str, Any]) -> int:
+    if "h" in (genome or {}):
+        try:
+            return max(0, min(8, int(genome.get("h", 4))))
+        except Exception:
+            return 4
+    # derive from H1..H4
+    score = 0
+    for L in ("H1", "H2", "H3", "H4"):
+        al = (genome or {}).get(L, ["h", "h"])
+        if isinstance(al, list) and len(al) >= 2:
+            score += (1 if al[0] == "H+" else 0) + (1 if al[1] == "H+" else 0)
+    return max(0, min(8, score))
 
-def expected_height(mom_g: dict, dad_g: dict) -> float:
-    # For each height locus H1..H4, expected H+ count contributed = mean of parental allele counts / 2
-    loci = [t["loci"] for t in TRAITS["traits"] if t["id"] == "height"][0]
-    mean = 0.0
-    for locus in loci:
-        m_prob = (mom_g.get(locus, ["h","h"]).count("H+")) / 2.0  # chance mom passes H+
-        d_prob = (dad_g.get(locus, ["h","h"]).count("H+")) / 2.0  # chance dad passes H+
-        mean += m_prob + d_prob
-    return mean  # out of 8
+def _resolve_leafiness(genome: Dict[str, Any], height_score: int) -> int:
+    if "leaves" in (genome or {}):
+        try:
+            return max(1, min(5, int(genome["leaves"])))
+        except Exception:
+            pass
+    # optional ML locus boosts tiers
+    ML = (genome or {}).get("ML")
+    bonus = 0
+    if isinstance(ML, list) and len(ML) >= 2:
+        bonus = (1 if ML[0] == "L+" else 0) + (1 if ML[1] == "L+" else 0)
+    base = 1 + (height_score // 2)  # 0..8 -> 1..5-ish
+    return max(1, min(5, base + bonus))
 
-def preview_cross_stats(mom_g: dict, dad_g: dict) -> dict:
-    # color
-    dom, rec = "C", "c"
-    p_colored = prob_dominant(mom_g.get("C", ["c","c"]), dad_g.get("C", ["c","c"]), dom, rec)
-    # variegation
-    p_var = prob_vv(mom_g.get("VAR", ["V","V"]), dad_g.get("VAR", ["V","V"]))
-    # height expectation
-    h_mean = expected_height(mom_g, dad_g)
-    # stability: proportion of loci that are homozygous and identical in both parents
-    loci = set(mom_g.keys()) | set(dad_g.keys())
-    fixed = 0
-    for L in loci:
-        m = mom_g.get(L, [])
-        d = dad_g.get(L, [])
-        if len(m)==2 and len(d)==2 and m[0]==m[1]==d[0]==d[1]:
-            fixed += 1
-    stability = 0.0 if not loci else fixed / len(loci)
+def express_phenotype(genome: Dict[str, Any] | str) -> Dict[str, Any]:
+    """
+    Convert any stored genome (dict or JSON string) into a compact phenotype dict
+    used by UI & systems:
+      {
+        "color_name": "green|red|yellow|purple|teal|white",
+        "variegated": bool,
+        "height_score": 0..8,
+        "leaf_tiers": 1..5,
+        # convenience mirrors:
+        "c": <color_name>, "vv": bool, "h": int, "leaves": int,
+        "gfp": "abcdef"  # fingerprint of canonical genome
+      }
+    """
+    if isinstance(genome, str):
+        try:
+            genome = json.loads(genome)
+        except Exception:
+            genome = {"RAW": genome}
+
+    color_name = _resolve_color_name(genome)
+    vv = _resolve_variegation(genome)
+    h = _resolve_height_score(genome)
+    leaves = _resolve_leafiness(genome, h)
+    gfp = genome_fingerprint(genome)
+
     return {
-        "p_colored": p_colored,         # 0..1
-        "p_variegated": p_var,          # 0..1 (vv)
-        "h_mean": h_mean,               # 0..8
-        "stability": stability          # 0..1
+        "color_name": color_name,
+        "variegated": vv,
+        "height_score": h,
+        "leaf_tiers": leaves,
+        "c": color_name,
+        "vv": vv,
+        "h": h,
+        "leaves": leaves,
+        "gfp": gfp,
     }
+
+
+# ------------------------------
+# Tiny util: safe int
+# ------------------------------
+def clamp_int(n: Any, lo: int, hi: int, default: int) -> int:
+    try:
+        v = int(n)
+    except Exception:
+        return default
+    return max(lo, min(hi, v))

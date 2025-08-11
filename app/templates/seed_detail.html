@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="grid grid-gap-lg" style="grid-template-columns: 1fr;">
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Seed Lot</h2>
+      <div class="row-wrap">
+        <a class="btn" href="/seeds">← Back to Seeds</a>
+      </div>
+    </div>
+
+    <div class="row-wrap" style="gap:18px; align-items:flex-start;">
+      <img src="/sprite/seed/{{ seed['species'] }}.svg" width="100" height="90" alt="seed"/>
+      <div>
+        <div class="muted mono">Lot ID</div>
+        <div class="mono">{{ seed['id'] }}</div>
+        <div class="muted mono" style="margin-top:8px;">Species / Gen</div>
+        <div>{{ seed['species'] }} · {{ seed['generation'] }}</div>
+        <div class="muted mono" style="margin-top:8px;">Quantity</div>
+        <div>{{ seed['qty'] }}</div>
+      </div>
+
+      <div class="card" style="padding:10px 12px;">
+        <div class="muted mono">Fingerprint</div>
+        <div id="gfp" class="mono" style="font-size:20px; letter-spacing:1px;">—</div>
+        <div class="muted" style="margin-top:6px;">Stable hash of canonical genome</div>
+      </div>
+    </div>
+
+    <details style="margin-top:16px;">
+      <summary class="link">Show genome JSON</summary>
+      <pre style="white-space:pre-wrap; background:#0f1422; border:1px solid #2a3147; border-radius:10px; padding:10px; margin-top:8px;">{{ genome | tojson(indent=2) }}</pre>
+    </details>
+
+    {% if parents %}
+    <div class="card" style="margin-top:16px;">
+      <div class="muted mono">Parents</div>
+      <div class="mono">mom: {{ parents.get('mom') or '—' }} · dad: {{ parents.get('dad') or '—' }}</div>
+    </div>
+    {% endif %}
+  </section>
+
+</div>
+
+<script>
+  // Compute the same-style fingerprint in-browser (canonical JSON + SHA-1, first 6 hex).
+  (async function(){
+    function sortKeys(obj){
+      if (Array.isArray(obj)) return obj.map(sortKeys);
+      if (obj && typeof obj === 'object'){
+        const out = {};
+        Object.keys(obj).sort().forEach(k => { out[k] = sortKeys(obj[k]); });
+        return out;
+      }
+      return obj;
+    }
+    const genome = {{ genome | tojson }};
+    const canon = JSON.stringify(sortKeys(genome));
+    const enc = new TextEncoder().encode(canon);
+    let hex = "??";
+    try {
+      const digest = await crypto.subtle.digest('SHA-1', enc);
+      const arr = Array.from(new Uint8Array(digest));
+      hex = arr.map(b => b.toString(16).padStart(2,'0')).join('').slice(0,6);
+    } catch(e){
+      // fallback poor-man hash
+      let h=0; for (let i=0;i<canon.length;i++){ h=(h*31 + canon.charCodeAt(i))|0; }
+      hex = (h>>>0).toString(16).slice(0,6);
+    }
+    document.getElementById('gfp').textContent = hex;
+  })();
+</script>
+{% endblock %}

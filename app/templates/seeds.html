@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Seeds</h2>
+
+{% if seeds|length == 0 %}
+  <p class="muted">No seeds yet. Breed, ripen, and harvest to generate seed lots.</p>
+{% else %}
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th></th><th>Species</th><th>Lot</th><th>Qty</th><th>Gen</th><th>Fingerprint</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in seeds %}
+          {% set species = s['species'] or 'Seed' %}
+          <tr>
+            <td style="width:70px">
+              <img alt="seed" width="64" height="42" src="/sprite/seed/{{ species|lower }}.svg"/>
+            </td>
+            <td>{{ species }}</td>
+            <td class="mono">
+              <a class="link" href="/seed/{{ s['id'] }}">{{ s['id'] }}</a>
+            </td>
+            <td>{{ s['qty'] }}</td>
+            <td>{{ s['generation'] }}</td>
+            <td class="mono"> {{ s['fingerprint'] }} </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+{% endblock %}

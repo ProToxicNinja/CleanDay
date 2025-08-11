@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="grid grid-gap-lg" style="grid-template-columns: 1fr 360px; align-items:start;">
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Market</h2>
+      <div class="row-wrap">
+        <div class="badge">Wallet: <span id="wallet">{{ '%.1f'|format(wallet) }}</span></div>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Seller</th><th>Species</th><th>Gen</th><th>GFP</th><th>Price</th><th>Qty</th><th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for it in items %}
+          <tr>
+            <td>{{ 'NPC' if it.is_npc else it.seller[:6] }}</td>
+            <td>{{ it.species }}</td>
+            <td>{{ it.generation }}</td>
+            <td class="mono">{{ it.gfp }}</td>
+            <td>{{ '%.1f'|format(it.price) }}</td>
+            <td>{{ it.qty }}</td>
+            <td>
+              {% if it.qty > 0 %}
+              <form action="/buy" method="post" class="row-wrap" style="gap:6px;">
+                <input type="hidden" name="listing_id" value="{{ it.id }}"/>
+                <input type="number" name="qty" min="1" max="{{ it.qty }}" value="1" class="input" style="width:72px;"/>
+                <button class="btn" type="submit">Buy</button>
+              </form>
+              {% else %}—{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <aside class="card">
+    <h3>List a Seed Lot</h3>
+    {% if my_seeds|length == 0 %}
+      <p class="muted">You have no seeds to list.</p>
+    {% else %}
+      <form action="/list" method="post" class="stack" style="gap:10px;">
+        <label>Seed Lot
+          <select name="seeds_id" class="input">
+            {% for s in my_seeds %}
+              {% set g = s.genome_json | loads %}
+              <option value="{{ s.id }}">
+                {{ s.species }} · {{ s.generation }} · qty {{ s.qty }} · gfp {{ g | genome_fp }}
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+        <div class="row-wrap" style="gap:10px;">
+          <label style="flex:1;">Qty
+            <input type="number" name="qty" min="1" value="1" class="input"/>
+          </label>
+          <label style="flex:1;">Price
+            <input id="price" type="number" step="0.1" name="price" value="10.0" class="input"/>
+          </label>
+        </div>
+        <p class="muted" id="suggest">Suggested: —</p>
+        <button class="btn" type="submit">Create Listing</button>
+      </form>
+      <script>
+        // show suggestion when seed lot changes
+        (function(){
+          const sel = document.querySelector('select[name="seeds_id"]');
+          const p   = document.getElementById('price');
+          const sug = document.getElementById('suggest');
+          const look = {{ suggested | tojson }};
+          function upd(){
+            const id = sel.value;
+            if (look[id]) { p.value = look[id].toFixed(1); sug.textContent = "Suggested: " + look[id].toFixed(1); }
+          }
+          sel.addEventListener('change', upd);
+          upd();
+        })();
+      </script>
+    {% endif %}
+  </aside>
+
+</div>
+{% endblock %}

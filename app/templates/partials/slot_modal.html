@@ -1,0 +1,93 @@
+<div class="card" style="background:#0f1422;">
+  <div class="card-head">
+    <h3>Plot / Slot <span class="mono">{{ slot.id }}</span></h3>
+    <button class="btn small" type="button" onclick="
+      document.getElementById('modal').style.display='none';
+      document.getElementById('modal-content').innerHTML='';
+    ">Close</button>
+  </div>
+
+  {% if slot.plant %}
+    <div class="row-wrap" style="align-items:flex-start;">
+      <img alt="sprite" width="100" height="90" src="/sprite/plant/{{ slot.plant.id }}.svg"/>
+      <div>
+        <div><strong>{{ slot.plant.name or '—' }}</strong></div>
+        <div class="muted">
+          {{ slot.plant.species }} · {{ slot.plant.generation }} · geno {{ slot.plant.gfp }}
+        </div>
+        <div>Appearance: <strong>{{ slot.plant.appearance }}</strong></div>
+        <div>Height score: <strong>{{ slot.plant.height_score }}</strong></div>
+        <div>Stage: <strong>{{ slot.plant.stage }}</strong> · Health <strong>{{ slot.plant.health }}</strong></div>
+      </div>
+    </div>
+
+    <div class="row-wrap" style="margin-top:10px;">
+      <!-- Rename -->
+      <form action="/rename_plant" method="post" class="inline">
+        <input type="hidden" name="plant_id" value="{{ slot.plant.id }}"/>
+        <input class="in" type="text" name="name" placeholder="Name this plant" value="{{ slot.plant.name or '' }}" />
+        <button class="btn small" type="submit">Rename</button>
+      </form>
+
+      <!-- Cull -->
+      <form action="/cull_plant" method="post" class="inline"
+            onsubmit="return confirm('Remove this plant from the plot?');">
+        <input type="hidden" name="plant_id" value="{{ slot.plant.id }}"/>
+        <button class="btn small danger" type="submit">Cull</button>
+      </form>
+    </div>
+
+  {% else %}
+    <!-- Empty plot: planting form -->
+    {% if seeds|length == 0 %}
+      <p class="muted">No seeds available. Breed and harvest to get seed lots.</p>
+    {% else %}
+      <form action="/plant_seed" method="post" style="margin-top:6px;">
+        <input type="hidden" name="slot_id" value="{{ slot.id }}"/>
+        <label>Select Seed Lot</label>
+        <select name="seed_id">
+          {% for s in seeds %}
+            <option value="{{ s.id }}">{{ s.species }} · {{ s.generation }} · geno {{ s.gfp }} (x{{ s.qty }})</option>
+          {% endfor %}
+        </select>
+        <button class="btn" type="submit">Plant in this plot</button>
+      </form>
+    {% endif %}
+  {% endif %}
+
+  <hr style="border:none; border-top:1px solid #2a3147; margin:12px 0;"/>
+
+  <!-- Environment editor (always shown) -->
+  <form action="/slot_update" method="post" class="row-wrap">
+    <input type="hidden" name="slot_id" value="{{ slot.id }}"/>
+    <label>Soil</label>
+    <select name="soil">
+      {% for v in ['loam','sand','clay'] %}
+        <option value="{{ v }}" {% if slot.soil == v %}selected{% endif %}>{{ v }}</option>
+      {% endfor %}
+    </select>
+
+    <label>Light</label>
+    <select name="light">
+      {% for v in ['low','med','high'] %}
+        <option value="{{ v }}" {% if slot.light == v %}selected{% endif %}>{{ v }}</option>
+      {% endfor %}
+    </select>
+
+    <label>Water</label>
+    <select name="water">
+      {% for v in ['under','ok','over'] %}
+        <option value="{{ v }}" {% if slot.water == v %}selected{% endif %}>{{ v }}</option>
+      {% endfor %}
+    </select>
+
+    <label>Temp</label>
+    <select name="temp">
+      {% for v in ['cool','warm'] %}
+        <option value="{{ v }}" {% if slot.temp == v %}selected{% endif %}>{{ v }}</option>
+      {% endfor %}
+    </select>
+
+    <button class="btn" type="submit">Save</button>
+  </form>
+</div>
