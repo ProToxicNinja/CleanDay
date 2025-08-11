@@ -4,6 +4,7 @@ import hashlib
 import random
 import sqlite3
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Iterable, Tuple, List
 
@@ -56,11 +57,8 @@ def now_iso() -> str:
 
 
 def uid(prefix: str | None = None) -> str:
-    """
-    Short unique id. If prefix is given, returns <prefix>_<id>.
-    Uses time (ms) + random nibble for low collision chance.
-    """
-    base = f"{int(time.time() * 1000):x}{random.randrange(0, 16):x}"[-8:]
+    """Return a short unique id with optional prefix."""
+    base = uuid.uuid4().hex[:8]
     return f"{prefix}_{base}" if prefix else base
 
 
