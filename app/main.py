@@ -33,6 +33,10 @@ app.include_router(game.router)
 market.ensure_market_schema()
 app.include_router(market.router)
 
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+
 # convenience root -> greenhouse
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
